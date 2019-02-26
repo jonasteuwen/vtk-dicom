@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2016 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -19,6 +19,7 @@
 #include "vtkDICOMParser.h"
 #include "vtkDICOMReader.h"
 #include "vtkDICOMFileSorter.h"
+#include "vtkDICOMSliceSorter.h"
 #include "vtkDICOMToRAS.h"
 #include "vtkDICOMCTRectifier.h"
 #include "vtkDICOMFile.h"
@@ -27,20 +28,20 @@
 #include "vtkNIFTIHeader.h"
 #include "vtkNIFTIWriter.h"
 
-#include <vtkVersion.h>
-#include <vtkImageData.h>
-#include <vtkMatrix4x4.h>
-#include <vtkImageReslice.h>
-#include <vtkImageCast.h>
-#include <vtkImageExtractComponents.h>
-#include <vtkStringArray.h>
-#include <vtkIntArray.h>
-#include <vtkErrorCode.h>
-#include <vtkSortFileNames.h>
-#include <vtkSmartPointer.h>
+#include "vtkVersion.h"
+#include "vtkImageData.h"
+#include "vtkMatrix4x4.h"
+#include "vtkImageReslice.h"
+#include "vtkImageCast.h"
+#include "vtkImageExtractComponents.h"
+#include "vtkStringArray.h"
+#include "vtkIntArray.h"
+#include "vtkErrorCode.h"
+#include "vtkSortFileNames.h"
+#include "vtkSmartPointer.h"
 
 #if (VTK_MAJOR_VERSION > 5) || (VTK_MINOR_VERSION > 9)
-#include <vtkImageHistogramStatistics.h>
+#include "vtkImageHistogramStatistics.h"
 #endif
 
 #include <string>
@@ -55,6 +56,7 @@
 // from dicomcli
 #include "vtkConsoleOutputWindow.h"
 #include "mainmacro.h"
+#include "readquery.h"
 
 // Simple structure for command-line options
 struct dicomtonifti_options
@@ -73,7 +75,12 @@ struct dicomtonifti_options
   bool silent;
   bool verbose;
   int volume;
+  double time_delta;
+  int time_units;
+  vtkDICOMTagPath time_tagpath;
+  vtkDICOMTagPath time_delta_tagpath;
   const char *output;
+  unsigned int conversions_attempted;
 };
 
 
@@ -87,7 +94,7 @@ void dicomtonifti_version(FILE *file, const char *command_name, bool verbose)
   {
     fprintf(file, "%s %s\n", cp, DICOM_VERSION);
     fprintf(file, "\n"
-      "Copyright (c) 2012-2016, David Gobbi.\n\n"
+      "Copyright (c) 2012-2019, David Gobbi.\n\n"
       "This software is distributed under an open-source license.  See the\n"
       "Copyright.txt file that comes with the vtk-dicom source distribution.\n");
   }
@@ -126,7 +133,10 @@ void dicomtonifti_usage(FILE *file, const char *command_name)
     "  --no-reordering         Never reorder slices, rows, or columns.\n"
     "  --no-qform              Don't include a qform in the NIFTI file.\n"
     "  --no-sform              Don't include an sform in the NIFTI file.\n"
-    "  --volume N              Set the volume to output (starts at 0).\n"
+    "  --time-tag              Set the tag to use for time coordinate.\n"
+    "  --time-delta-tag        Set the tag to use for time spacing.\n"
+    "  --time-delta            Force the time spacing to be the given value.\n"
+    "  --volume N              Set which volume to output (starts at 0).\n"
     "  --version               Print the version and exit.\n"
     "  --build-version         Print source and build version.\n"
     "  --help                  Documentation for dicomtonifti.\n"
@@ -172,6 +182,16 @@ void dicomtonifti_help(FILE *file, const char *command_name)
     "superior, column number increasing from right to left, and row number\n"
     "increasing from posterior to anterior.  This will also convert the data\n"
     "type from unsigned 16-bit to signed 16-bit if necessary.\n"
+    "\n");
+  fprintf(file,
+    "The --time-tag, --time-delta-tag, and --time-delta options can be used\n"
+    "to tweak the time information.  By default, tags such as TriggerTime,\n"
+    "TemporalPositionIdentifier, or TriggerTime are used to perform\n"
+    "temporal sorting, but --time-tag can be used to explicitly name a tag.\n"
+    "The --time-delta-tag option can be used to set which tag gives temporal\n"
+    "spacing, if there is no tag that gives the temporal coordinate.\n"
+    "The --time-delta option will force the temporal spacing to be a specific\n"
+    "value, e.g. 500ms, 2s, or 2600us.\n"
     "\n");
   fprintf(file,
     "If batch mode is selected, the output file given with \"-o\" can be\n"
@@ -261,6 +281,50 @@ bool dicomtonifti_check_error(vtkObject *o)
   return true;
 }
 
+
+bool dicomtonifti_time_delta(const char *arg, dicomtonifti_options *options)
+{
+  const char *unit_list[6] = {
+    "s", "ms", "us", "Hz", "ppm", "rads"
+  };
+  int unit_consts[6] = {
+    8, 16, 24, 32, 40, 48   // from NIFTI header
+  };
+
+  char *units;
+  double t = strtod(arg, &units);
+  if (units == arg || t == 0.0)
+  {
+    fprintf(stderr, "Illegal value for --time-delta: %s\n", arg);
+    return false;
+  }
+
+  options->time_delta = t;
+
+  if (units[0] != '\0')
+  {
+    options->time_units = 0;
+
+    for (int i = 0; i < 6; i++)
+    {
+      if (strcmp(units, unit_list[i]) == 0)
+      {
+        options->time_units = unit_consts[i];
+        break;
+      }
+    }
+
+    if (options->time_units == 0)
+    {
+      fprintf(stderr, "Illegal value for --time-delta: %s\n", arg);
+      fprintf(stderr, "Units must be s, ms, Hz, ppm, or rads.\n");
+      return false;
+    }
+  }
+
+  return true;
+}
+
 // Read the options
 void dicomtonifti_read_options(
   int argc, char *argv[],
@@ -280,7 +344,12 @@ void dicomtonifti_read_options(
   options->silent = false;
   options->verbose = false;
   options->volume = -1;
+  options->time_delta = 0.0;
+  options->time_units = 16;  // default to msec
+  options->time_tagpath = vtkDICOMTagPath();
+  options->time_delta_tagpath = vtkDICOMTagPath();
   options->output = 0;
+  options->conversions_attempted = 0;
 
   // read the options from the command line
   int argi = 1;
@@ -339,6 +408,43 @@ void dicomtonifti_read_options(
       else if (strcmp(arg, "--no-sform") == 0)
       {
         options->no_sform = true;
+      }
+      else if (strcmp(arg, "--time-delta") == 0 ||
+               strcmp(arg, "--time-delta-tag") == 0 ||
+               strcmp(arg, "--time-tag") == 0)
+      {
+        if (argi >= argc || argv[argi][0] == '-')
+        {
+          fprintf(stderr, "\nAn argument must follow \'%s\'\n\n", arg);
+          dicomtonifti_usage(stderr, argv[0]);
+          exit(1);
+        }
+        const char *optionarg = arg;
+        arg = argv[argi++];
+        if (strcmp(optionarg, "--time-delta") == 0)
+        {
+          if (!dicomtonifti_time_delta(arg, options))
+          {
+            exit(1);
+          }
+        }
+        else
+        {
+          vtkDICOMItem data;
+          QueryTagList qtlist;
+          if (!dicomcli_readkey(arg, &data, &qtlist))
+          {
+            exit(1);
+          }
+          if (strcmp(optionarg, "--time-delta-tag") == 0)
+          {
+            options->time_delta_tagpath = qtlist[0];
+          }
+          else
+          {
+            options->time_tagpath = qtlist[0];
+          }
+        }
       }
       else if (strcmp(arg, "--batch") == 0)
       {
@@ -535,7 +641,7 @@ std::string dicomtonifti_make_filename(
         }
         if (meta)
         {
-          v = meta->GetAttributeValue(tag);
+          v = meta->Get(tag);
         }
         if (v.IsValid())
         {
@@ -562,15 +668,41 @@ std::string dicomtonifti_make_filename(
 
 // Convert one DICOM series into one NIFTI file
 void dicomtonifti_convert_one(
-  const dicomtonifti_options *options, vtkStringArray *a,
+  dicomtonifti_options *options, vtkStringArray *a,
   const char *outfile)
 {
+  // make sure there are files to read
+  if (a->GetNumberOfValues() == 0) {
+    return;
+  }
+
+  // increment the number of conversions attempted
+  options->conversions_attempted++;
+
   // read the files
   vtkSmartPointer<vtkDICOMReader> reader =
     vtkSmartPointer<vtkDICOMReader>::New();
   reader->SetMemoryRowOrderToFileNative();
   reader->TimeAsVectorOn();
   reader->SetFileNames(a);
+  // check for user-supplied time info
+  if (options->time_delta != 0.0 ||
+      options->time_delta_tagpath.GetSize() > 0)
+  {
+    reader->GetSorter()->RepeatsAsTimeOn();
+  }
+  if (options->time_tagpath.GetSize() > 0)
+  {
+    vtkDICOMTagPath tagpath = options->time_tagpath;
+    vtkDICOMTag tag = tagpath.GetHead();
+    while (tagpath.HasTail())
+    {
+      reader->GetSorter()->SetTimeSequence(tag);
+      tagpath = tagpath.GetTail();
+      tag = tagpath.GetHead();
+    }
+    reader->GetSorter()->SetTimeTag(tag);
+  }
   reader->Update();
   if (dicomtonifti_check_error(reader)) {
     return;
@@ -781,7 +913,7 @@ void dicomtonifti_convert_one(
   vtkDICOMMetaData *meta = reader->GetMetaData();
 
   // the descrip is the date followed by the series description and ID
-  std::string date = meta->GetAttributeValue(DC::SeriesDate).AsString();
+  std::string date = meta->Get(DC::SeriesDate).AsString();
   if (date.length() >= 8)
   {
     const char *months[13] = { "/   /", "/Jan/", "/Feb/", "/Mar/", "/Apr/",
@@ -791,15 +923,15 @@ void dicomtonifti_convert_one(
     date = date.substr(6, 2) + months[month] + date.substr(0, 4);
   }
   std::string descrip = date + " " +
-    meta->GetAttributeValue(DC::SeriesDescription).AsString() + " " +
-    meta->GetAttributeValue(DC::StudyID).AsString();
+    meta->Get(DC::SeriesDescription).AsString() + " " +
+    meta->Get(DC::StudyID).AsString();
   descrip = descrip.substr(0, 79);
 
   // assume the units are millimetres/milliseconds
-  hdr->SetXYZTUnits(0x12);
+  hdr->SetXYZTUnits(0x02 + options->time_units);
 
   // get the phase encoding direction
-  std::string phase = meta->GetAttributeValue(
+  std::string phase = meta->Get(
     firstFile, firstFrame, vtkDICOMTag(0x0018,0x1312)).AsString();
   if (phase == "COLUMN")
   {
@@ -819,8 +951,7 @@ void dicomtonifti_convert_one(
   }
 
   // get the scale information, if same for all slices
-  if (meta->GetAttributeValue(
-       firstFile, firstFrame, DC::RescaleSlope).IsValid())
+  if (meta->Get(firstFile, firstFrame, DC::RescaleSlope).IsValid())
   {
     hdr->SetSclSlope(reader->GetRescaleSlope());
     hdr->SetSclInter(reader->GetRescaleIntercept());
@@ -828,21 +959,18 @@ void dicomtonifti_convert_one(
 
   // compute a cal_min, cal_max
   bool useWindowLevel = false;
-  if (meta->GetAttributeValue(
-       firstFile, firstFrame, DC::WindowWidth).IsValid())
+  if (meta->Get(firstFile, firstFrame, DC::WindowWidth).IsValid())
   {
     useWindowLevel = true;
-    double w = meta->GetAttributeValue(
-      firstFile, firstFrame, DC::WindowWidth).GetDouble(0);
-    double l = meta->GetAttributeValue(
-      firstFile, firstFrame, DC::WindowCenter).GetDouble(0);
+    double w = meta->Get(firstFile, firstFrame, DC::WindowWidth).GetDouble(0);
+    double l = meta->Get(firstFile, firstFrame, DC::WindowCenter).GetDouble(0);
     int n = fileIndices->GetNumberOfTuples();
     for (int i = 1; i < n; i++)
     {
       int j = fileIndices->GetComponent(i, 0);
       int k = frameIndices->GetComponent(i, 0);
-      double tw = meta->GetAttributeValue(j, k, DC::WindowWidth).GetDouble(0);
-      double tl = meta->GetAttributeValue(j, k, DC::WindowCenter).GetDouble(0);
+      double tw = meta->Get(j, k, DC::WindowWidth).GetDouble(0);
+      double tl = meta->Get(j, k, DC::WindowCenter).GetDouble(0);
       if (tl != l || tw != w)
       {
         useWindowLevel = false;
@@ -866,7 +994,7 @@ void dicomtonifti_convert_one(
   if (!useWindowLevel)
   {
     std::string photometric =
-      meta->GetAttributeValue(DC::PhotometricInterpretation).AsString();
+      meta->Get(DC::PhotometricInterpretation).AsString();
     if (photometric == "MONOCHROME1" || photometric == "MONOCHROME2")
     {
       // compute range rather than using DICOM window/level setting
@@ -896,6 +1024,21 @@ void dicomtonifti_convert_one(
   {
     writer->SetTimeDimension(reader->GetTimeDimension());
     writer->SetTimeSpacing(reader->GetTimeSpacing());
+    if (options->time_delta != 0.0)
+    {
+      // override if user gave --time-delta
+      writer->SetTimeSpacing(options->time_delta);
+    }
+    else if (options->time_delta_tagpath.GetSize() > 0)
+    {
+      // override if user gave --time-delta-tag
+      const vtkDICOMValue& tsv =
+        meta->Get(firstFile, firstFrame, options->time_delta_tagpath);
+      if (tsv.IsValid())
+      {
+        writer->SetTimeSpacing(tsv.AsDouble());
+      }
+    }
   }
   if ((options->no_slice_reordering && slicesReordered) ||
       options->fsl)
@@ -919,7 +1062,7 @@ void dicomtonifti_convert_one(
 // Process a list of DICOM files
 void dicomtonifti_convert_files(
   dicomtonifti_options *options, vtkStringArray *files,
-  const char *outpath)
+  const char *outpath, unsigned int depth)
 {
   // sort the files by filename first, as a fallback
   vtkSmartPointer<vtkSortFileNames> presorter =
@@ -951,8 +1094,13 @@ void dicomtonifti_convert_files(
         outfile.append(".gz");
       }
     }
+    // if filenames given directly on command line, use them directly,
+    // but files were found in a given directory, sort them first
+    if (depth != 0) {
+      files = sorter->GetOutputFileNames();
+    }
     dicomtonifti_convert_one(
-      options, sorter->GetOutputFileNames(), outfile.c_str());
+      options, files, outfile.c_str());
   }
   else
   {
@@ -1022,7 +1170,8 @@ void dicomtonifti_convert_files(
 // Process a list of files and directories
 void dicomtonifti_files_and_dirs(
   dicomtonifti_options *options, vtkStringArray *files,
-  const char *outpath, std::set<std::string> *pastdirs)
+  const char *outpath, std::set<std::string> *pastdirs,
+  unsigned int depth)
 {
   // look for directories among the files
   vtkSmartPointer<vtkStringArray> directories =
@@ -1053,7 +1202,7 @@ void dicomtonifti_files_and_dirs(
 
   if (newfiles->GetNumberOfValues() > 0)
   {
-    dicomtonifti_convert_files(options, newfiles, outpath);
+    dicomtonifti_convert_files(options, newfiles, outpath, depth);
   }
 
   n = directories->GetNumberOfValues();
@@ -1076,10 +1225,10 @@ void dicomtonifti_files_and_dirs(
     else
     {
       files->Initialize();
-      unsigned long nf = directory.GetNumberOfFiles();
+      unsigned long nf = directory.GetNumberOfEntries();
       for (unsigned long j = 0; j < nf; j++)
       {
-        const char *dirfile = directory.GetFile(j);
+        const char *dirfile = directory.GetEntry(j);
         if (dirfile[0] != '.' || (dirfile[1] != '\0' &&
             (dirfile[1] != '.' || dirfile[2] != '\0')))
         {
@@ -1088,7 +1237,7 @@ void dicomtonifti_files_and_dirs(
           path.PopBack();
         }
       }
-      dicomtonifti_files_and_dirs(options, files, outpath, pastdirs);
+      dicomtonifti_files_and_dirs(options, files, outpath, pastdirs, depth+1);
     }
   }
 }
@@ -1144,7 +1293,11 @@ int MAINMACRO(int argc, char *argv[])
   }
 
   std::set<std::string> pastdirs;
-  dicomtonifti_files_and_dirs(&options, files, outpath, &pastdirs);
+  dicomtonifti_files_and_dirs(&options, files, outpath, &pastdirs, 0);
+
+  if (!options.batch && options.conversions_attempted == 0) {
+    fprintf(stderr, "No input DICOM files were found!\n\n");
+  }
 
   return 0;
 }

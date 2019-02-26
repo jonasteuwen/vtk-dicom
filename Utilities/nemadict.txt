@@ -424,6 +424,12 @@ SOPClassesInStudy
 UI
 1-n
 
+(0008,0063)
+Anatomic Regions in Study Code Sequence
+AnatomicRegionsInStudyCodeSequence
+SQ
+1
+
 (0008,0064)
 Conversion Type
 ConversionType
@@ -550,6 +556,18 @@ ExtendedCodeMeaning
 LT
 1
 DICOS
+(0008,0109)
+Coding Scheme Resources Sequence
+CodingSchemeResourcesSequence
+SQ
+1
+
+(0008,010A)
+Coding Scheme URL Type
+CodingSchemeURLType
+CS
+1
+
 (0008,010B)
 Context Group Extension Flag
 ContextGroupExtensionFlag
@@ -566,6 +584,12 @@ UI
 Context Group Extension Creator UID
 ContextGroupExtensionCreatorUID
 UI
+1
+
+(0008,010E)
+Coding Scheme URL
+CodingSchemeURL
+UR
 1
 
 (0008,010F)
@@ -820,6 +844,12 @@ InstitutionalDepartmentName
 LO
 1
 
+(0008,1041)
+Institutional Department Type Code Sequence
+InstitutionalDepartmentTypeCodeSequence
+SQ
+1
+
 (0008,1048)
 Physician(s) of Record
 PhysiciansOfRecord
@@ -974,6 +1004,12 @@ UI
 Referenced SOP Instance UID
 ReferencedSOPInstanceUID
 UI
+1
+
+(0008,1156)
+Definition Source Sequence
+DefinitionSourceSequence
+SQ
 1
 
 (0008,115A)
@@ -1221,7 +1257,7 @@ Anatomic Structure, Space or Region Sequence
 AnatomicStructureSpaceOrRegionSequence
 SQ
 1
-
+RET
 (0008,2230)
 Primary Anatomic Structure Modifier Sequence
 PrimaryAnatomicStructureModifierSequence
@@ -1600,12 +1636,36 @@ StrainCodeSequence
 SQ
 1
 
+(0010,0221)
+Genetic Modifications Sequence
+GeneticModificationsSequence
+SQ
+1
+
+(0010,0222)
+Genetic Modifications Description
+GeneticModificationsDescription
+UC
+1
+
+(0010,0223)
+Genetic Modifications Nomenclature
+GeneticModificationsNomenclature
+LO
+1
+
+(0010,0229)
+Genetic Modifications Code Sequence
+GeneticModificationsCodeSequence
+SQ
+1
+
 (0010,1000)
 Other Patient IDs
 OtherPatientIDs
 LO
 1-n
-
+RET
 (0010,1001)
 Other Patient Names
 OtherPatientNames
@@ -1701,7 +1761,7 @@ Medical Record Locator
 MedicalRecordLocator
 LO
 1
-
+RET
 (0010,1100)
 Referenced Patient Photo Sequence
 ReferencedPatientPhotoSequence
@@ -1922,6 +1982,18 @@ LO
 Clinical Trial Time Point Description
 ClinicalTrialTimePointDescription
 ST
+1
+
+(0012,0052)
+Longitudinal Temporal Offset from Event
+LongitudinalTemporalOffsetFromEvent
+FD
+1
+
+(0012,0053)
+Longitudinal Temporal Event Type
+LongitudinalTemporalEventType
+CS
 1
 
 (0012,0060)
@@ -4162,10 +4234,22 @@ CompressionForce
 DS
 1
 
+(0018,11A3)
+Compression Pressure
+CompressionPressure
+DS
+1
+
 (0018,11A4)
 Paddle Description
 PaddleDescription
 LO
+1
+
+(0018,11A5)
+Compression Contact Area
+CompressionContactArea
+DS
 1
 
 (0018,1200)
@@ -6640,6 +6724,222 @@ CTAdditionalXRaySourceSequence
 SQ
 1
 
+(0018,9361)
+Multi-energy CT Acquisition
+MultienergyCTAcquisition
+CS
+1
+
+(0018,9362)
+Multi-energy CT Acquisition Sequence
+MultienergyCTAcquisitionSequence
+SQ
+1
+
+(0018,9363)
+Multi-energy CT Processing Sequence
+MultienergyCTProcessingSequence
+SQ
+1
+
+(0018,9364)
+Multi-energy CT Characteristics Sequence
+MultienergyCTCharacteristicsSequence
+SQ
+1
+
+(0018,9365)
+Multi-energy CT X-Ray Source Sequence
+MultienergyCTXRaySourceSequence
+SQ
+1
+
+(0018,9366)
+X-Ray Source Index
+XRaySourceIndex
+US
+1
+
+(0018,9367)
+X-Ray Source ID
+XRaySourceID
+UC
+1
+
+(0018,9368)
+Multi-energy Source Technique
+MultienergySourceTechnique
+CS
+1
+
+(0018,9369)
+Source Start Date Time
+SourceStartDateTime
+DT
+1
+
+(0018,936A)
+Source End Date Time
+SourceEndDateTime
+DT
+1
+
+(0018,936B)
+Switching Phase Number
+SwitchingPhaseNumber
+US
+1
+
+(0018,936C)
+Switching Phase Nominal Duration
+SwitchingPhaseNominalDuration
+DS
+1
+
+(0018,936D)
+Switching Phase Transition Duration
+SwitchingPhaseTransitionDuration
+DS
+1
+
+(0018,936E)
+Effective Bin Energy
+EffectiveBinEnergy
+DS
+1
+
+(0018,936F)
+Multi-energy CT X-Ray Detector Sequence
+MultienergyCTXRayDetectorSequence
+SQ
+1
+
+(0018,9370)
+X-Ray Detector Index
+XRayDetectorIndex
+US
+1
+
+(0018,9371)
+X-Ray Detector ID
+XRayDetectorID
+UC
+1
+
+(0018,9372)
+Multi-energy Detector Type
+MultienergyDetectorType
+CS
+1
+
+(0018,9373)
+X-Ray Detector Label
+XRayDetectorLabel
+ST
+1
+
+(0018,9374)
+Nominal Max Energy
+NominalMaxEnergy
+DS
+1
+
+(0018,9375)
+Nominal Min Energy
+NominalMinEnergy
+DS
+1
+
+(0018,9376)
+Referenced X-Ray Detector Index
+ReferencedXRayDetectorIndex
+US
+1-n
+
+(0018,9377)
+Referenced X-Ray Source Index
+ReferencedXRaySourceIndex
+US
+1-n
+
+(0018,9378)
+Referenced Path Index
+ReferencedPathIndex
+US
+1-n
+
+(0018,9379)
+Multi-energy CT Path Sequence
+MultienergyCTPathSequence
+SQ
+1
+
+(0018,937A)
+Multi-energy CT Path Index
+MultienergyCTPathIndex
+US
+1
+
+(0018,937B)
+Multi-energy Acquisition Description
+MultienergyAcquisitionDescription
+UT
+1
+
+(0018,937C)
+Monoenergetic Energy Equivalent
+MonoenergeticEnergyEquivalent
+FD
+1
+
+(0018,937D)
+Material Code Sequence
+MaterialCodeSequence
+SQ
+1
+
+(0018,937E)
+Decomposition Method
+DecompositionMethod
+CS
+1
+
+(0018,937F)
+Decomposition Description
+DecompositionDescription
+UT
+1
+
+(0018,9380)
+Decomposition Algorithm Identification Sequence
+DecompositionAlgorithmIdentificationSequence
+SQ
+1
+
+(0018,9381)
+Decomposition Material Sequence
+DecompositionMaterialSequence
+SQ
+1
+
+(0018,9382)
+Material Attenuation Sequence
+MaterialAttenuationSequence
+SQ
+1
+
+(0018,9383)
+Photon Energy
+PhotonEnergy
+DS
+1
+
+(0018,9384)
+X-Ray Mass Attenuation Coefficient
+XRayMassAttenuationCoefficient
+DS
+1
+
 (0018,9401)
 Projection Pixel Calibration Sequence
 ProjectionPixelCalibrationSequence
@@ -9088,6 +9388,12 @@ SourceOfOphthalmicAxialLengthCodeSequence
 SQ
 1
 
+(0022,1036)
+Source of Corneal Size Data Code Sequence
+SourceOfCornealSizeDataCodeSequence
+SQ
+1
+
 (0022,1037)
 Target Refraction
 TargetRefraction
@@ -9578,6 +9884,120 @@ UL
 Two Dimensional to Three Dimensional Map Data
 TwoDimensionalToThreeDimensionalMapData
 OF
+1
+
+(0022,1612)
+Derivation Algorithm Sequence
+DerivationAlgorithmSequence
+SQ
+1
+
+(0022,1615)
+Ophthalmic Image Type Code Sequence
+OphthalmicImageTypeCodeSequence
+SQ
+1
+
+(0022,1616)
+Ophthalmic Image Type Description
+OphthalmicImageTypeDescription
+LO
+1
+
+(0022,1618)
+Scan Pattern Type Code Sequence
+ScanPatternTypeCodeSequence
+SQ
+1
+
+(0022,1620)
+Referenced Surface Mesh Identification Sequence
+ReferencedSurfaceMeshIdentificationSequence
+SQ
+1
+
+(0022,1622)
+Ophthalmic Volumetric Properties Flag
+OphthalmicVolumetricPropertiesFlag
+CS
+1
+
+(0022,1624)
+Ophthalmic Anatomic Reference Point X-Coordinate
+OphthalmicAnatomicReferencePointXCoordinate
+FL
+1
+
+(0022,1626)
+Ophthalmic Anatomic Reference Point Y-Coordinate
+OphthalmicAnatomicReferencePointYCoordinate
+FL
+1
+
+(0022,1628)
+Ophthalmic En Face Image Quality Rating Sequence
+OphthalmicEnFaceImageQualityRatingSequence
+SQ
+1
+
+(0022,1630)
+Quality Threshold
+QualityThreshold
+DS
+1
+
+(0022,1640)
+OCT B-scan Analysis Acquisition Parameters Sequence
+OCTBscanAnalysisAcquisitionParametersSequence
+SQ
+1
+
+(0022,1642)
+Number of B-scans Per Frame
+NumberofBscansPerFrame
+UL
+1
+
+(0022,1643)
+B-scan Slab Thickness
+BscanSlabThickness
+FL
+1
+
+(0022,1644)
+Distance Between B-scan Slabs
+DistanceBetweenBscanSlabs
+FL
+1
+
+(0022,1645)
+B-scan Cycle Time
+BscanCycleTime
+FL
+1
+
+(0022,1646)
+B-scan Cycle Time Vector
+BscanCycleTimeVector
+FL
+1-n
+
+(0022,1649)
+A-scan Rate
+AscanRate
+FL
+1
+
+(0022,1650)
+B-scan Rate
+BscanRate
+FL
+1
+
+(0022,1658)
+Surface Mesh Z-Pixel Offset
+SurfaceMeshZPixelOffset
+UL
 1
 
 (0024,0010)
@@ -12525,13 +12945,13 @@ Total Time of Fluoroscopy
 TotalTimeOfFluoroscopy
 US
 1
-
+RET
 (0040,0301)
 Total Number of Exposures
 TotalNumberOfExposures
 US
 1
-
+RET
 (0040,0302)
 Entrance Dose
 EntranceDose
@@ -12561,7 +12981,7 @@ Exposure Dose Sequence
 ExposureDoseSequence
 SQ
 1
-
+RET
 (0040,0310)
 Comments on Radiation Dose
 CommentsOnRadiationDose
@@ -12784,6 +13204,12 @@ SlideIdentifier
 LO
 1
 RET
+(0040,0710)
+Whole Slide Microscopy Image Frame Type Sequence
+WholeSlideMicroscopyImageFrameTypeSequence
+SQ
+1
+
 (0040,071A)
 Image Center Point Coordinates Sequence
 ImageCenterPointCoordinatesSequence
@@ -13065,6 +13491,12 @@ Performed Processing Applications Code Sequence
 PerformedProcessingApplicationsCodeSequence
 SQ
 1
+RET
+(0040,4008)
+Scheduled Procedure Step Expiration DateTime
+ScheduledProcedureStepExpirationDateTime
+DT
+1
 
 (0040,4009)
 Human Performer Code Sequence
@@ -13113,7 +13545,7 @@ Input Availability Flag
 InputAvailabilityFlag
 CS
 1
-
+RET
 (0040,4021)
 Input Information Sequence
 InputInformationSequence
@@ -13274,6 +13706,12 @@ SQ
 Entrance Dose in mGy
 EntranceDoseInmGy
 DS
+1
+
+(0040,8303)
+Entrance Dose Derivation
+EntranceDoseDerivation
+CS
 1
 
 (0040,9092)
@@ -14248,6 +14686,72 @@ SubstanceAdministrationParameterSequence
 SQ
 1
 
+(0044,0100)
+Approval Sequence
+ApprovalSequence
+SQ
+1
+
+(0044,0101)
+Assertion Code Sequence
+AssertionCodeSequence
+SQ
+1
+
+(0044,0102)
+Assertion UID
+AssertionUID
+UI
+1
+
+(0044,0103)
+Asserter Identification Sequence
+AsserterIdentificationSequence
+SQ
+1
+
+(0044,0104)
+Assertion DateTime
+AssertionDateTime
+DT
+1
+
+(0044,0105)
+Assertion Expiration DateTime
+AssertionExpirationDateTime
+DT
+1
+
+(0044,0106)
+Assertion Comments
+AssertionComments
+UT
+1
+
+(0044,0107)
+Related Assertion Sequence
+RelatedAssertionSequence
+SQ
+1
+
+(0044,0108)
+Referenced Assertion UID
+ReferencedAssertionUID
+UI
+1
+
+(0044,0109)
+Approval Subject Sequence
+ApprovalSubjectSequence
+SQ
+1
+
+(0044,010A)
+Organizational Role Code Sequence
+OrganizationalRoleCodeSequence
+SQ
+1
+
 (0046,0012)
 Lens Description
 LensDescription
@@ -14336,6 +14840,12 @@ FD
 Corneal Size
 CornealSize
 FD
+1
+
+(0046,0047)
+Corneal Size Sequence
+CornealSizeSequence
+SQ
 1
 
 (0046,0050)
@@ -14908,6 +15418,18 @@ PixelOriginInterpretation
 CS
 1
 
+(0048,0302)
+Number of Optical Paths
+NumberOfOpticalPaths
+UL
+1
+
+(0048,0303)
+Total Pixel Matrix Focal Planes
+TotalPixelMatrixFocalPlanes
+UL
+1
+
 (0050,0004)
 Calibration Image
 CalibrationImage
@@ -15002,6 +15524,12 @@ LO
 Device Description
 DeviceDescription
 LO
+1
+
+(0050,0021)
+Long Device Description
+LongDeviceDescription
+ST
 1
 
 (0052,0001)
@@ -15796,6 +16324,12 @@ UsedSegmentsSequence
 SQ
 1
 
+(0062,0013)
+Segments Overlap
+SegmentsOverlap
+CS
+1
+
 (0062,0020)
 Tracking ID
 TrackingID
@@ -16367,10 +16901,10 @@ SQ
 1
 
 (0068,62F0)
-View Orientation Modifier
-ViewOrientationModifier
-FD
-9
+View Orientation Modifier Code Sequence
+ViewOrientationModifierCodeSequence
+SQ
+1
 
 (0068,62F2)
 HPGL Document Scaling
@@ -16677,6 +17211,24 @@ FD
 ThreeDPlaneNormal
 FD
 3
+
+(0068,7001)
+Model Modification
+ModelModification
+CS
+1
+
+(0068,7002)
+Model Mirroring
+ModelMirroring
+CS
+1
+
+(0068,7003)
+Model Usage Code Sequence
+ModelUsageCodeSequence
+SQ
+1
 
 (0070,0001)
 Graphic Annotation Sequence
@@ -17278,6 +17830,12 @@ FiducialUID
 UI
 1
 
+(0070,031B)
+Referenced Fiducial UID
+ReferencedFiducialUID
+UI
+1
+
 (0070,031C)
 Fiducial Set Sequence
 FiducialSetSequence
@@ -17385,7 +17943,7 @@ Compositing Method
 CompositingMethod
 CS
 1
-
+RET
 (0070,1207)
 Volumetric Presentation Input Number
 VolumetricPresentationInputNumber
@@ -17395,6 +17953,36 @@ US
 (0070,1208)
 Image Volume Geometry
 ImageVolumeGeometry
+CS
+1
+
+(0070,1209)
+Volumetric Presentation Input Set UID
+VolumetricPresentationInputSetUID
+UI
+1
+
+(0070,120A)
+Volumetric Presentation Input Set Sequence
+VolumetricPresentationInputSetSequence
+SQ
+1
+
+(0070,120B)
+Global Crop
+GlobalCrop
+CS
+1
+
+(0070,120C)
+Global Cropping Specification Index
+GlobalCroppingSpecificationIndex
+US
+1-n
+
+(0070,120D)
+Rendering Method
+RenderingMethod
 CS
 1
 
@@ -17500,6 +18088,78 @@ MPRViewHeight
 FD
 1
 
+(0070,1602)
+Render Projection
+RenderProjection
+CS
+1
+
+(0070,1603)
+Viewpoint Position
+ViewpointPosition
+FD
+3
+
+(0070,1604)
+Viewpoint LookAt Point
+ViewpointLookAtPoint
+FD
+3
+
+(0070,1605)
+Viewpoint Up Direction
+ViewpointUpDirection
+FD
+3
+
+(0070,1606)
+Render Field of View
+RenderFieldOfView
+FD
+6
+
+(0070,1607)
+Sampling Step Size
+SamplingStepSize
+FD
+1
+
+(0070,1701)
+Shading Style
+ShadingStyle
+CS
+1
+
+(0070,1702)
+Ambient Reflection Intensity
+AmbientReflectionIntensity
+FD
+1
+
+(0070,1703)
+Light Direction
+LightDirection
+FD
+3
+
+(0070,1704)
+Diffuse Reflection Intensity
+DiffuseReflectionIntensity
+FD
+1
+
+(0070,1705)
+Specular Reflection Intensity
+SpecularReflectionIntensity
+FD
+1
+
+(0070,1706)
+Shininess
+Shininess
+FD
+1
+
 (0070,1801)
 Presentation State Classification Component Sequence
 PresentationStateClassificationComponentSequence
@@ -17599,6 +18259,96 @@ SQ
 (0070,1A05)
 Animation Step Size
 AnimationStepSize
+FD
+1
+
+(0070,1A06)
+Swivel Range
+SwivelRange
+FD
+1
+
+(0070,1A07)
+Volumetric Curve Up Directions
+VolumetricCurveUpDirections
+OD
+1
+
+(0070,1A08)
+Volume Stream Sequence
+VolumeStreamSequence
+SQ
+1
+
+(0070,1A09)
+RGBA Transfer Function Description
+RGBATransferFunctionDescription
+LO
+1
+
+(0070,1B01)
+Advanced Blending Sequence
+AdvancedBlendingSequence
+SQ
+1
+
+(0070,1B02)
+Blending Input Number
+BlendingInputNumber
+US
+1
+
+(0070,1B03)
+Blending Display Input Sequence
+BlendingDisplayInputSequence
+SQ
+1
+
+(0070,1B04)
+Blending Display Sequence
+BlendingDisplaySequence
+SQ
+1
+
+(0070,1B06)
+Blending Mode
+BlendingMode
+CS
+1
+
+(0070,1B07)
+Time Series Blending
+TimeSeriesBlending
+CS
+1
+
+(0070,1B08)
+Geometry for Display
+GeometryForDisplay
+CS
+1
+
+(0070,1B11)
+Threshold Sequence
+ThresholdSequence
+SQ
+1
+
+(0070,1B12)
+Threshold Value Sequence
+ThresholdValueSequence
+SQ
+1
+
+(0070,1B13)
+Threshold Type
+ThresholdType
+CS
+1
+
+(0070,1B14)
+Threshold Value
+ThresholdValue
 FD
 1
 
@@ -18364,6 +19114,12 @@ ProcedureStepProgressDescription
 ST
 1
 
+(0074,1007)
+Procedure Step Progress Parameters Sequence
+ProcedureStepProgressParametersSequence
+SQ
+1
+
 (0074,1008)
 Procedure Step Communications URI Sequence
 ProcedureStepCommunicationsURISequence
@@ -18835,7 +19591,7 @@ SQ
 (0076,0034)
 Component Type Code Sequence
 ComponentTypeCodeSequence
-CS
+SQ
 1
 
 (0076,0036)
@@ -19070,13 +19826,13 @@ SH
 U Value Data
 UValueData
 OF
-1-n
+1
 
 (0080,0011)
 V Value Data
 VValueData
 OF
-1-n
+1
 
 (0080,0012)
 Referenced Texture Sequence
@@ -19140,7 +19896,7 @@ UT
 
 (0082,000C)
 Structured Constraint Observation Sequence
-StructuredContraintObservationSequence
+StructuredConstraintObservationSequence
 SQ
 1
 
@@ -19447,6 +20203,12 @@ LO
 (0400,0565)
 Reason for the Attribute Modification
 ReasonForTheAttributeModification
+CS
+1
+
+(0400,0600)
+Instance Origin Status
+InstanceOriginStatus
 CS
 1
 
@@ -20608,6 +21370,12 @@ ROIGenerationAlgorithm
 CS
 1
 
+(3006,0037)
+ROI Derivation Algorithm Identification Sequence
+ROIDerivationAlgorithmIdentificationSequence
+SQ
+1
+
 (3006,0038)
 ROI Generation Description
 ROIGenerationDescription
@@ -21694,6 +22462,12 @@ BeamDoseSpecificationPoint
 DS
 3
 
+(300A,0083)
+Referenced Dose Reference UID
+ReferencedDoseReferenceUID
+UI
+1
+
 (300A,0084)
 Beam Dose
 BeamDose
@@ -21711,19 +22485,19 @@ Beam Dose Point Depth
 BeamDosePointDepth
 FL
 1
-RET
+
 (300A,0089)
 Beam Dose Point Equivalent Depth
 BeamDosePointEquivalentDepth
 FL
 1
-RET
+
 (300A,008A)
 Beam Dose Point SSD
 BeamDosePointSSD
 FL
 1
-RET
+
 (300A,008B)
 Beam Dose Meaning
 BeamDoseMeaning
@@ -21741,19 +22515,19 @@ Average Beam Dose Point Depth
 AverageBeamDosePointDepth
 FL
 1
-
+RET
 (300A,008E)
 Average Beam Dose Point Equivalent Depth
 AverageBeamDosePointEquivalentDepth
 FL
 1
-
+RET
 (300A,008F)
 Average Beam Dose Point SSD
 AverageBeamDosePointSSD
 FL
 1
-
+RET
 (300A,0090)
 Beam Dose Type
 BeamDoseType
@@ -21770,6 +22544,18 @@ DS
 Alternate Beam Dose Type
 AlternateBeamDoseType
 CS
+1
+
+(300A,0093)
+Depth Value Averaging Flag
+DepthValueAveragingFlag
+CS
+1
+
+(300A,0094)
+Beam Dose Point Source to External Contour Distance
+BeamDosePointSourceToExternalContourDistance
+DS
 1
 
 (300A,00A0)
@@ -22870,6 +23656,30 @@ BrachyAccessoryDeviceNominalTransmission
 DS
 1
 
+(300A,0271)
+Channel Effective Length
+ChannelEffectiveLength
+DS
+1
+
+(300A,0272)
+Channel Inner Length
+ChannelInnerLength
+DS
+1
+
+(300A,0273)
+Afterloader Channel ID
+AfterloaderChannelID
+SH
+1
+
+(300A,0274)
+Source Applicator Tip Length
+SourceApplicatorTipLength
+DS
+1
+
 (300A,0280)
 Channel Sequence
 ChannelSequence
@@ -23948,6 +24758,810 @@ TM
 Reviewer Name
 ReviewerName
 PN
+1
+
+(3010,0001)
+Radiobiological Dose Effect Sequence
+RadiobiologicalDoseEffectSequence
+SQ
+1
+
+(3010,0002)
+Radiobiological Dose Effect Flag
+RadiobiologicalDoseEffectFlag
+CS
+1
+
+(3010,0003)
+Effective Dose Calculation Method Category Code Sequence
+EffectiveDoseCalculationMethodCategoryCodeSequence
+SQ
+1
+
+(3010,0004)
+Effective Dose Calculation Method Code Sequence
+EffectiveDoseCalculationMethodCodeSequence
+SQ
+1
+
+(3010,0005)
+Effective Dose Calculation Method Description
+EffectiveDoseMethodDescription
+LO
+1
+
+(3010,0006)
+Conceptual Volume UID
+ConceptualVolumeUID
+UI
+1
+
+(3010,0007)
+Originating SOP Instance Reference Sequence
+OriginatingSOPInstanceReferenceSequence
+SQ
+1
+
+(3010,0008)
+Conceptual Volume Constituent Sequence
+ConceptualVolumeConstituentSequence
+SQ
+1
+
+(3010,0009)
+Equivalent Conceptual Volume Instance Reference Sequence
+EquivalentConceptualVolumeInstanceReferenceSequence
+SQ
+1
+
+(3010,000A)
+Equivalent Conceptual Volumes Sequence
+EquivalentConceptualVolumesSequence
+SQ
+1
+
+(3010,000B)
+Referenced Conceptual Volume UID
+ReferencedConceptualVolumeUID
+UI
+1
+
+(3010,000C)
+Conceptual Volume Combination Expression
+ConceptualVolumeCombinationExpression
+UT
+1
+
+(3010,000D)
+Conceptual Volume Constituent Index
+ConceptualVolumeConstituentIndex
+US
+1
+
+(3010,000E)
+Conceptual Volume Combination Flag
+ConceptualVolumeCombinationFlag
+CS
+1
+
+(3010,000F)
+Conceptual Volume Combination Description
+ConceptualVolumeCombinationDescription
+ST
+1
+
+(3010,0010)
+Conceptual Volume Segmentation Defined Flag
+ConceptualVolumeSegmentationDefinedFlag
+CS
+1
+
+(3010,0011)
+Conceptual Volume Segmentation Reference Sequence
+ConceptualVolumeSegmentationReferenceSequence
+SQ
+1
+
+(3010,0012)
+Conceptual Volume Constituent Segmentation Reference Sequence
+ConceptualVolumeConstituentSegmentationReferenceSequence
+SQ
+1
+
+(3010,0013)
+Constituent Conceptual Volume UID
+ConstituentConceptualVolumeUID
+UI
+1
+
+(3010,0014)
+Derivation Conceptual Volume Sequence
+DerivationConceptualVolumeSequence
+SQ
+1
+
+(3010,0015)
+Source Conceptual Volume UID
+SourceConceptualVolumeUID
+UI
+1
+
+(3010,0016)
+Conceptual Volume Derivation Algorithm Sequence
+ConceptualVolumeDerivationAlgorithmSequence
+SQ
+1
+
+(3010,0017)
+Conceptual Volume Description
+ConceptualVolumeDescription
+ST
+1
+
+(3010,0018)
+Source Conceptual Volume Sequence
+SourceConceptualVolumeSequence
+SQ
+1
+
+(3010,0019)
+Author Identification Sequence
+AuthorIdentificationSequence
+SQ
+1
+
+(3010,001A)
+Manufacturer's Model Version
+ManufacturersModelVersion
+LO
+1
+
+(3010,001B)
+Device Alternate Identifier
+DeviceAlternateIdentifier
+UC
+1
+
+(3010,001C)
+Device Alternate Identifier Type
+DeviceAlternateIdentifierType
+CS
+1
+
+(3010,001D)
+Device Alternate Identifier Format
+DeviceAlternateIdentifierFormat
+LT
+1
+
+(3010,001E)
+Segmentation Creation Template Label
+SegmentationCreationTemplateLabel
+LO
+1
+
+(3010,001F)
+Segmentation Template UID
+SegmentationTemplateUID
+UI
+1
+
+(3010,0020)
+Referenced Segment Reference Index
+ReferencedSegmentReferenceIndex
+US
+1
+
+(3010,0021)
+Segment Reference Sequence
+SegmentReferenceSequence
+SQ
+1
+
+(3010,0022)
+Segment Reference Index
+SegmentReferenceIndex
+US
+1
+
+(3010,0023)
+Direct Segment Reference Sequence
+DirectSegmentReferenceSequence
+SQ
+1
+
+(3010,0024)
+Combination Segment Reference Sequence
+CombinationSegmentReferenceSequence
+SQ
+1
+
+(3010,0025)
+Conceptual Volume Sequence
+ConceptualVolumeSequence
+SQ
+1
+
+(3010,0026)
+Segmented RT Accessory Device Sequence
+SegmentedRTAccessoryDeviceSequence
+SQ
+1
+
+(3010,0027)
+Segment Characteristics Sequence
+SegmentCharacteristicsSequence
+SQ
+1
+
+(3010,0028)
+Related Segment Characteristics Sequence
+RelatedSegmentCharacteristicsSequence
+SQ
+1
+
+(3010,0029)
+Segment Characteristics Precedence
+SegmentCharacteristicsPrecedence
+US
+1
+
+(3010,002A)
+RT Segment Annotation Sequence
+RTSegmentAnnotationSequence
+SQ
+1
+
+(3010,002B)
+Segment Annotation Category Code Sequence
+SegmentAnnotationCategoryCodeSequence
+SQ
+1
+
+(3010,002C)
+Segment Annotation Type Code Sequence
+SegmentAnnotationTypeCodeSequence
+SQ
+1
+
+(3010,002D)
+Device Label
+DeviceLabel
+LO
+1
+
+(3010,002E)
+Device Type Code Sequence
+DeviceTypeCodeSequence
+SQ
+1
+
+(3010,0030)
+Patient Equipment Relationship Code Sequence
+PatientEquipmentRelationshipCodeSequence
+SQ
+1
+
+(3010,0031)
+Referenced Fiducials UID
+ReferencedFiducialsUID
+UI
+1
+
+(3010,0032)
+Patient Treatment Orientation Sequence
+PatientTreatmentOrientationSequence
+SQ
+1
+
+(3010,0033)
+User Content Label
+UserContentLabel
+SH
+1
+
+(3010,0034)
+User Content Long Label
+UserContentLongLabel
+LO
+1
+
+(3010,0035)
+Entity Label
+EntityLabel
+SH
+1
+
+(3010,0036)
+Entity Name
+EntityName
+LO
+1
+
+(3010,0037)
+Entity Description
+EntityDescription
+ST
+1
+
+(3010,0038)
+Entity Long Label
+EntityLongLabel
+LO
+1
+
+(3010,0039)
+Device Index
+DeviceIndex
+US
+1
+
+(3010,003A)
+RT Treatment Phase Index
+RTTreatmentPhaseIndex
+US
+1
+
+(3010,003B)
+RT Treatment Phase UID
+RTTreatmentPhaseUID
+UI
+1
+
+(3010,003C)
+RT Prescription Index
+RTPrescriptionIndex
+US
+1
+
+(3010,003D)
+RT Segment Annotation Index
+RTSegmentAnnotationIndex
+US
+1
+
+(3010,003E)
+Basis RT Treatment Phase Index
+BasisRTTreatmentPhaseIndex
+US
+1
+
+(3010,003F)
+Related RT Treatment Phase Index
+RelatedRTTreatmentPhaseIndex
+US
+1
+
+(3010,0040)
+Referenced RT Treatment Phase Index
+ReferencedRTTreatmentPhaseIndex
+US
+1
+
+(3010,0041)
+Referenced RT Prescription Index
+ReferencedRTPrescriptionIndex
+US
+1
+
+(3010,0042)
+Referenced Parent RT Prescription Index
+ReferencedParentRTPrescriptionIndex
+US
+1
+
+(3010,0043)
+Manufacturer's Device Identifier
+ManufacturerDeviceIdentifier
+ST
+1
+
+(3010,0044)
+Instance-Level Referenced Performed Procedure Step Sequence
+InstanceLevelReferencedPerformedProcedureStepSequence
+SQ
+1
+
+(3010,0045)
+RT Treatment Phase Intent Presence Flag
+RTTreatmentPhaseIntentPresenceFlag
+CS
+1
+
+(3010,0046)
+Radiotherapy Treatment Type
+RadiotherapyTreatmentType
+CS
+1
+
+(3010,0047)
+Teletherapy Radiation Type
+TeletherapyRadiationType
+CS
+1-n
+
+(3010,0048)
+Brachytherapy Source Type
+BrachytherapySourceType
+CS
+1-n
+
+(3010,0049)
+Referenced RT Treatment Phase Sequence
+ReferencedRTTreatmentPhaseSequence
+SQ
+1
+
+(3010,004A)
+Referenced Direct Segment Instance Sequence
+ReferencedDirectSegmentInstanceSequence
+SQ
+1
+
+(3010,004B)
+Intended RT Treatment Phase Sequence
+IntendedRTTreatmentPhaseSequence
+SQ
+1
+
+(3010,004C)
+Intended Phase Start Date
+IntendedPhaseStartDate
+DA
+1
+
+(3010,004D)
+Intended Phase End Date
+IntendedPhaseEndDate
+DA
+1
+
+(3010,004E)
+RT Treatment Phase Interval Sequence
+RTTreatmentPhaseIntervalSequence
+SQ
+1
+
+(3010,004F)
+Temporal Relationship Interval Anchor
+TemporalRelationshipIntervalAnchor
+CS
+1
+
+(3010,0050)
+Minimum Number of Interval Days
+MinimumNumberOfIntervalDays
+FD
+1
+
+(3010,0051)
+Maximum Number of Interval Days
+MaximumNumberOfIntervalDays
+FD
+1
+
+(3010,0052)
+Pertinent SOP Classes in Study
+PertinentSOPClassesInStudy
+UI
+1-n
+
+(3010,0053)
+Pertinent SOP Classes in Series
+PertinentSOPClassesInSeries
+UI
+1-n
+
+(3010,0054)
+RT Prescription Label
+RTPrescriptionLabel
+LO
+1
+
+(3010,0055)
+RT Physician Intent Predecessor Sequence
+RTPhysicianIntentPredecessorSequence
+SQ
+1
+
+(3010,0056)
+RT Treatment Approach Label
+RTTreatmentApproachLabel
+LO
+1
+
+(3010,0057)
+RT Physician Intent Sequence
+RTPhysicianIntentSequence
+SQ
+1
+
+(3010,0058)
+RT Physician Intent Index
+RTPhysicianIntentIndex
+US
+1
+
+(3010,0059)
+RT Treatment Intent Type
+RTTreatmentIntentType
+CS
+1
+
+(3010,005A)
+RT Physician Intent Narrative
+RTPhysicianIntentNarrative
+UT
+1
+
+(3010,005B)
+RT Protocol Code Sequence
+RTProtocolCodeSequence
+SQ
+1
+
+(3010,005C)
+Reason for Superseding
+ReasonForSuperseding
+ST
+1
+
+(3010,005D)
+RT Diagnosis Code Sequence
+RTDiagnosisCodeSequence
+SQ
+1
+
+(3010,005E)
+Referenced RT Physician Intent Index
+ReferencedRTPhysicianIntentIndex
+US
+1
+
+(3010,005F)
+RT Physician Intent Input Instance Sequence
+RTPhysicianIntentInputInstanceSequence
+SQ
+1
+
+(3010,0060)
+RT Anatomic Prescription Sequence
+RTAnatomicPrescriptionSequence
+SQ
+1
+
+(3010,0061)
+Prior Treatment Dose Description
+PriorTreatmentDoseDescription
+UT
+1
+
+(3010,0062)
+Prior Treatment Reference Sequence
+PriorTreatmentReferenceSequence
+SQ
+1
+
+(3010,0063)
+Dosimetric Objective Evaluation Scope
+DosimetricObjectiveEvaluationScope
+CS
+1
+
+(3010,0064)
+Therapeutic Role Category Code Sequence
+TherapeuticRoleCategoryCodeSequence
+SQ
+1
+
+(3010,0065)
+Therapeutic Role Type Code Sequence
+TherapeuticRoleTypeCodeSequence
+SQ
+1
+
+(3010,0066)
+Conceptual Volume Optimization Precedence
+ConceptualVolumeOptimizationPrecedence
+US
+1
+
+(3010,0067)
+Conceptual Volume Category Code Sequence
+ConceptualVolumeCategoryCodeSequence
+SQ
+1
+
+(3010,0068)
+Conceptual Volume Blocking Constraint
+ConceptualVolumeBlockingConstraint
+CS
+1
+
+(3010,0069)
+Conceptual Volume Type Code Sequence
+ConceptualVolumeTypeCodeSequence
+SQ
+1
+
+(3010,006A)
+Conceptual Volume Type Modifier Code Sequence
+ConceptualVolumeTypeModifierCodeSequence
+SQ
+1
+
+(3010,006B)
+RT Prescription Sequence
+RTPrescriptionSequence
+SQ
+1
+
+(3010,006C)
+Dosimetric Objective Sequence
+DosimetricObjectiveSequence
+SQ
+1
+
+(3010,006D)
+Dosimetric Objective Type Code Sequence
+DosimetricObjectiveTypeCodeSequence
+SQ
+1
+
+(3010,006E)
+Dosimetric Objective UID
+DosimetricObjectiveUID
+UI
+1
+
+(3010,006F)
+Referenced Dosimetric Objective UID
+ReferencedDosimetricObjectiveUID
+UI
+1
+
+(3010,0070)
+Dosimetric Objective Parameter Sequence
+DosimetricObjectiveParameterSequence
+SQ
+1
+
+(3010,0071)
+Referenced Dosimetric Objectives Sequence
+ReferencedDosimetricObjectivesSequence
+SQ
+1
+
+(3010,0073)
+Absolute Dosimetric Objective Flag
+AbsoluteDosimetricObjectiveFlag
+CS
+1
+
+(3010,0074)
+Dosimetric Objective Weight
+DosimetricObjectiveWeight
+FD
+1
+
+(3010,0075)
+Dosimetric Objective Purpose
+DosimetricObjectivePurpose
+CS
+1
+
+(3010,0076)
+Planning Input Information Sequence
+PlanningInputInformationSequence
+SQ
+1
+
+(3010,0077)
+Treatment Site
+TreatmentSite
+LO
+1
+
+(3010,0078)
+Treatment Site Code Sequence
+TreatmentSiteCodeSequence
+SQ
+1
+
+(3010,0079)
+Fraction Pattern Sequence
+FractionPatternSequence
+SQ
+1
+
+(3010,007A)
+Treatment Technique Notes
+TreatmentTechniqueNotes
+UT
+1
+
+(3010,007B)
+Prescription Notes
+PrescriptionNotes
+UT
+1
+
+(3010,007C)
+Number of Interval Fractions
+NumberOfIntervalFractions
+IS
+1
+
+(3010,007D)
+Number of Fractions
+NumberOfFractions
+US
+1
+
+(3010,007E)
+Intended Delivery Duration
+IntendedDeliveryDuration
+US
+1
+
+(3010,007F)
+Fractionation Notes
+FractionationNotes
+UT
+1
+
+(3010,0080)
+RT Treatment Technique Code Sequence
+RTTreatmentTechniqueCodeSequence
+SQ
+1
+
+(3010,0081)
+Prescription Notes Sequence
+PrescriptionNotesSequence
+SQ
+1
+
+(3010,0082)
+Fraction-Based Relationship Sequence
+FractionBasedRelationshipSequence
+SQ
+1
+
+(3010,0083)
+Fraction-Based Relationship Interval Anchor
+FractionBasedRelationshipIntervalAnchor
+CS
+1
+
+(3010,0084)
+Minimum Hours between Fractions
+MinimumHoursBetweenFractions
+FD
+1
+
+(3010,0085)
+Intended Fraction Start Time
+IntendedFractionStartTime
+TM
+1-n
+
+(3010,0086)
+Intended Start Day of Week
+IntendedStartDayOfWeek
+LT
+1
+
+(3010,0087)
+Weekday Fraction Pattern Sequence
+WeekdayFractionPatternSequence
+SQ
+1
+
+(3010,0088)
+Delivery Time Structure Code Sequence
+DeliveryTimeStructureCodeSequence
+SQ
 1
 
 (4000,0010)

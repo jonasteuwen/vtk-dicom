@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -14,7 +14,7 @@
 #ifndef vtkDICOMTag_h
 #define vtkDICOMTag_h
 
-#include <vtkSystemIncludes.h>
+#include "vtkSystemIncludes.h"
 #include "vtkDICOMModule.h" // For export macro
 #include "vtkDICOMDictHash.h"
 
@@ -52,6 +52,10 @@ public:
   //@}
 
   //@{
+  //! Get the tag as a 32-bit key.
+  unsigned int GetKey() const {
+    return this->Key; }
+
   //! Compute a hash value, used for accelerating lookups.
   unsigned int ComputeHash() const {
     unsigned int h = (((this->Key >> 6) & 0x03FF03FF) ^ this->Key);

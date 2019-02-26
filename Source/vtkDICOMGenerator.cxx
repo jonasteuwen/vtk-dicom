@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -62,6 +62,7 @@ vtkDICOMGenerator::vtkDICOMGenerator()
   this->TimeSpacing = 1.0;
   this->RescaleIntercept = 0.0;
   this->RescaleSlope = 1.0;
+  this->NumberOfOverlays = 0;
   this->PatientMatrix = 0;
   this->SliceIndexArray = vtkIntArray::New();
   this->ComponentIndexArray = vtkIntArray::New();
@@ -189,6 +190,7 @@ void vtkDICOMGenerator::PrintSelf(ostream& os, vtkIndent indent)
   os << indent << "TimeSpacing: " << this->TimeSpacing << "\n";
   os << indent << "RescaleIntercept: " << this->RescaleIntercept << "\n";
   os << indent << "RescaleSlope: " << this->RescaleSlope << "\n";
+  os << indent << "NumberOfOverlays: " << this->NumberOfOverlays << "\n";
 
   os << indent << "PatientMatrix:";
   if (this->PatientMatrix)
@@ -461,37 +463,6 @@ void vtkDICOMGenerator::MatchInstances(vtkDICOMMetaData *sourcemeta)
   double matrix[16];
   this->ComputeAdjustedMatrix(matrix, origin, spacing);
 
-  // compare the orientation with the input slices
-  bool mismatch = false;
-  int m = source->GetNumberOfInstances();
-  for (int j = 0; j < m && !mismatch; j++)
-  {
-    const vtkDICOMValue &o =
-      source->GetAttributeValue(j, DC::ImageOrientationPatient);
-    if (o.GetNumberOfValues() != 6)
-    {
-      mismatch = true;
-      break;
-    }
-
-    double orientation[6];
-    o.GetValues(orientation, 6);
-    for (int i = 0; i < 3; i++)
-    {
-      if (fabs(matrix[4*i] - orientation[i]) > 1e-4 ||
-          fabs(matrix[4*i + 1] - orientation[i + 3]) > 1e-4)
-      {
-        mismatch = true;
-        break;
-      }
-    }
-  }
-
-  if (mismatch)
-  {
-    return;
-  }
-
   this->SourceInstanceArray = vtkIntArray::New();
   this->SourceInstanceArray->SetNumberOfComponents(1);
   this->SourceInstanceArray->SetNumberOfTuples(
@@ -504,12 +475,14 @@ void vtkDICOMGenerator::MatchInstances(vtkDICOMMetaData *sourcemeta)
   }
 
   // for keeping track of which source instances have been matched
+  int m = source->GetNumberOfInstances();
   bool *usedInstances = new bool[m];
   for (int j = 0; j < m; j++)
   {
     usedInstances[j] = false;
   }
 
+  bool mismatch = false;
   int n = this->MetaData->GetNumberOfInstances();
   double zorigin = origin[2];
   for (int i = 0; i < n && !mismatch; i++)
@@ -534,19 +507,28 @@ void vtkDICOMGenerator::MatchInstances(vtkDICOMMetaData *sourcemeta)
         continue;
       }
 
-      const vtkDICOMValue &p =
-        source->GetAttributeValue(j, DC::ImagePositionPatient);
-      if (p.GetNumberOfValues() == 3)
+      const vtkDICOMValue &p = source->Get(j, DC::ImagePositionPatient);
+      const vtkDICOMValue &o = source->Get(j, DC::ImageOrientationPatient);
+      if (p.GetNumberOfValues() == 3 &&
+          o.GetNumberOfValues() == 6)
       {
-        double r[3];
+        double r[3], uv[6];
         p.GetValues(r, 3);
-        double dd = 0;
+        o.GetValues(uv, 6);
+        double dd = 0.0;
+        double uu = 0.0;
+        double vv = 0.0;
         for (int k = 0; k < 3; k++)
         {
           double d = r[k] - position[k];
           dd += d*d;
+          double u = matrix[4*k] - uv[k];
+          uu += u*u;
+          double v = matrix[4*k +1] - uv[k + 3];
+          vv += v*v;
         }
-        if (dd/(spacing[2]*spacing[2]) < 1e-8)
+        if (dd/(spacing[2]*spacing[2]) < 1e-8 &&
+            uu < 1e-8 && vv < 1e-8)
         {
           this->SourceInstanceArray->SetComponent(i, 0, j);
           usedInstances[j] = true;
@@ -874,7 +856,7 @@ bool vtkDICOMGenerator::CopyRequiredAttributes(
   vtkDICOMMetaData *meta = this->MetaData;
 
   if (source && source == this->SourceMetaData && this->SourceInstanceArray &&
-      source->HasAttribute(DC::PerFrameFunctionalGroupsSequence))
+      source->Has(DC::PerFrameFunctionalGroupsSequence))
   {
     while (*tags != DC::ItemDelimitationItem)
     {
@@ -885,11 +867,11 @@ bool vtkDICOMGenerator::CopyRequiredAttributes(
       for (int i = 0; i < n; i++)
       {
         int j = this->SourceInstanceArray->GetComponent(i, 0);
-        const vtkDICOMValue& v = sourceAdapter->GetAttributeValue(j, tag);
+        const vtkDICOMValue& v = sourceAdapter->Get(j, tag);
         if (v.IsValid())
         {
           nonevalid = false;
-          meta->SetAttributeValue(i, tag, v);
+          meta->Set(i, tag, v);
         }
       }
       if (nonevalid)
@@ -898,7 +880,7 @@ bool vtkDICOMGenerator::CopyRequiredAttributes(
         vtkDICOMVR vr = meta->FindDictVR(0, tag);
         if (vr != vtkDICOMVR::UN)
         {
-          meta->SetAttributeValue(tag, vtkDICOMValue(vr));
+          meta->Set(tag, vtkDICOMValue(vr));
         }
       }
     }
@@ -913,7 +895,7 @@ bool vtkDICOMGenerator::CopyRequiredAttributes(
       {
         if (!iter->IsPerInstance())
         {
-          meta->SetAttributeValue(tag, iter->GetValue());
+          meta->Set(tag, iter->GetValue());
         }
         else if (this->SourceInstanceArray && source == this->SourceMetaData)
         {
@@ -921,7 +903,7 @@ bool vtkDICOMGenerator::CopyRequiredAttributes(
           for (int i = 0; i < n; i++)
           {
             int j = this->SourceInstanceArray->GetComponent(i, 0);
-            meta->SetAttributeValue(i, tag, iter->GetValue(j));
+            meta->Set(i, tag, iter->GetValue(j));
           }
         }
       }
@@ -931,7 +913,7 @@ bool vtkDICOMGenerator::CopyRequiredAttributes(
         vtkDICOMVR vr = meta->FindDictVR(0, tag);
         if (vr != vtkDICOMVR::UN)
         {
-          meta->SetAttributeValue(tag, vtkDICOMValue(vr));
+          meta->Set(tag, vtkDICOMValue(vr));
         }
       }
     }
@@ -944,7 +926,7 @@ bool vtkDICOMGenerator::CopyRequiredAttributes(
       vtkDICOMVR vr = meta->FindDictVR(0, tag);
       if (vr != vtkDICOMVR::UN)
       {
-        meta->SetAttributeValue(tag, vtkDICOMValue(vr));
+        meta->Set(tag, vtkDICOMValue(vr));
       }
     }
   }
@@ -959,7 +941,7 @@ bool vtkDICOMGenerator::CopyOptionalAttributes(
   vtkDICOMMetaData *meta = this->MetaData;
 
   if (source && source == this->SourceMetaData && this->SourceInstanceArray &&
-      source->HasAttribute(DC::PerFrameFunctionalGroupsSequence))
+      source->Has(DC::PerFrameFunctionalGroupsSequence))
   {
     while (*tags != DC::ItemDelimitationItem)
     {
@@ -969,10 +951,10 @@ bool vtkDICOMGenerator::CopyOptionalAttributes(
       for (int i = 0; i < n; i++)
       {
         int j = this->SourceInstanceArray->GetComponent(i, 0);
-        const vtkDICOMValue& v = sourceAdapter->GetAttributeValue(j, tag);
+        const vtkDICOMValue& v = sourceAdapter->Get(j, tag);
         if (v.IsValid())
         {
-          meta->SetAttributeValue(i, tag, v);
+          meta->Set(i, tag, v);
         }
       }
     }
@@ -987,7 +969,7 @@ bool vtkDICOMGenerator::CopyOptionalAttributes(
       {
         if (!iter->IsPerInstance())
         {
-          meta->SetAttributeValue(tag, iter->GetValue());
+          meta->Set(tag, iter->GetValue());
         }
         else if (this->SourceInstanceArray && source == this->SourceMetaData)
         {
@@ -995,7 +977,7 @@ bool vtkDICOMGenerator::CopyOptionalAttributes(
           for (int i = 0; i < n; i++)
           {
             int j = this->SourceInstanceArray->GetComponent(i, 0);
-            meta->SetAttributeValue(i, tag, iter->GetValue(j));
+            meta->Set(i, tag, iter->GetValue(j));
           }
         }
       }
@@ -1021,7 +1003,7 @@ bool vtkDICOMGenerator::GenerateSOPCommonModule(
 {
   // set the SOP class UID and instance UIDs
   vtkDICOMMetaData *meta = this->MetaData;
-  meta->SetAttributeValue(DC::SOPClassUID, SOPClass);
+  meta->Set(DC::SOPClassUID, SOPClass);
   int n = meta->GetNumberOfInstances();
   vtkSmartPointer<vtkStringArray> uids =
     vtkSmartPointer<vtkStringArray>::New();
@@ -1029,19 +1011,18 @@ bool vtkDICOMGenerator::GenerateSOPCommonModule(
   this->GenerateUIDs(DC::SOPInstanceUID, uids);
   for (int i = 0; i < n; i++)
   {
-    meta->SetAttributeValue(i, DC::SOPInstanceUID, uids->GetValue(i));
+    meta->Set(i, DC::SOPInstanceUID, uids->GetValue(i));
   }
 
   // set the InstanceCreationDate and Time
   const char *tz = 0;
   if (source)
   {
-    tz = source->GetAttributeValue(
-      DC::TimezoneOffsetFromUTC).GetCharData();
+    tz = source->Get(DC::TimezoneOffsetFromUTC).GetCharData();
   }
   std::string dt = vtkDICOMUtilities::GenerateDateTime(tz);
-  meta->SetAttributeValue(DC::InstanceCreationDate, dt.substr(0, 8));
-  meta->SetAttributeValue(DC::InstanceCreationTime, dt.substr(8, 13));
+  meta->Set(DC::InstanceCreationDate, dt.substr(0, 8));
+  meta->Set(DC::InstanceCreationTime, dt.substr(8, 13));
 
   // These optional attributes should be left alone for now
   // DC::InstanceCreatorUID
@@ -1135,15 +1116,14 @@ bool vtkDICOMGenerator::GenerateGeneralStudyModule(vtkDICOMMetaData *source)
   std::string studyUID;
   if (source)
   {
-    studyUID = source->GetAttributeValue(
-      DC::StudyInstanceUID).AsString();
+    studyUID = source->Get(DC::StudyInstanceUID).AsString();
   }
   if (studyUID == "")
   {
     studyUID = this->GenerateUID(DC::StudyInstanceUID);
   }
   vtkDICOMMetaData *meta = this->MetaData;
-  meta->SetAttributeValue(DC::StudyInstanceUID, studyUID);
+  meta->Set(DC::StudyInstanceUID, studyUID);
 
   // required items: use simple read/write validation
   static const DC::EnumType required[] = {
@@ -1221,22 +1201,20 @@ bool vtkDICOMGenerator::GenerateGeneralSeriesModule(vtkDICOMMetaData *source)
 {
   // The SeriesUID is mandatory and must be unique.
   vtkDICOMMetaData *meta = this->MetaData;
-  meta->SetAttributeValue(
-    DC::SeriesInstanceUID,
-    this->GenerateUID(DC::SeriesInstanceUID));
+  meta->Set(DC::SeriesInstanceUID, this->GenerateUID(DC::SeriesInstanceUID));
 
   // The modality is mandatory, it cannot be left blank,
   // and it must agree with the SOP Class IOD.
   std::string m;
   if (source)
   {
-    m = source->GetAttributeValue(DC::Modality).AsString();
+    m = source->Get(DC::Modality).AsString();
   }
   if (m == "")
   {
     m = "OT"; // Other, i.e. unknown
   }
-  meta->SetAttributeValue(DC::Modality, m);
+  meta->Set(DC::Modality, m);
 
   // Set pixel min/max information
   if (this->ScalarType != VTK_INT && this->ScalarType != VTK_UNSIGNED_INT)
@@ -1262,11 +1240,9 @@ bool vtkDICOMGenerator::GenerateGeneralSeriesModule(vtkDICOMMetaData *source)
     // These are optional, but very nice to have
     if (this->PixelValueRange[0] <= this->PixelValueRange[1])
     {
-      meta->SetAttributeValue(
-        DC::SmallestPixelValueInSeries,
+      meta->Set(DC::SmallestPixelValueInSeries,
         vtkDICOMValue(pixelVR, this->PixelValueRange[0]));
-      meta->SetAttributeValue(
-        DC::LargestPixelValueInSeries,
+      meta->Set(DC::LargestPixelValueInSeries,
         vtkDICOMValue(pixelVR, this->PixelValueRange[1]));
     }
   }
@@ -1339,10 +1315,8 @@ bool vtkDICOMGenerator::GenerateFrameOfReferenceModule(
   // the frame of reference might have changed.
   if (source)
   {
-    uid = source->GetAttributeValue(
-      DC::FrameOfReferenceUID).AsString();
-    fid = source->GetAttributeValue(
-      DC::PositionReferenceIndicator).AsString();
+    uid = source->Get(DC::FrameOfReferenceUID).AsString();
+    fid = source->Get(DC::PositionReferenceIndicator).AsString();
   }
   if (uid == "")
   {
@@ -1350,8 +1324,8 @@ bool vtkDICOMGenerator::GenerateFrameOfReferenceModule(
   }
 
   vtkDICOMMetaData *meta = this->MetaData;
-  meta->SetAttributeValue(DC::FrameOfReferenceUID, uid);
-  meta->SetAttributeValue(DC::PositionReferenceIndicator, fid);
+  meta->Set(DC::FrameOfReferenceUID, uid);
+  meta->Set(DC::PositionReferenceIndicator, fid);
 
   return true;
 }
@@ -1397,12 +1371,12 @@ bool vtkDICOMGenerator::GenerateGeneralImageModule(
   for (int i = 0; i < n; i++)
   {
     unsigned int instance = i + 1;
-    meta->SetAttributeValue(i, DC::InstanceNumber, instance);
+    meta->Set(i, DC::InstanceNumber, instance);
   }
 
   // PatientInformation is required if no ImagePlane module is present,
   // it will be overwritten if a real value is found
-  meta->SetAttributeValue(DC::PatientOrientation, "");
+  meta->Set(DC::PatientOrientation, "");
 
   // optional and conditional: direct copy of values with no checks
   static const DC::EnumType optional[] = {
@@ -1452,12 +1426,10 @@ bool vtkDICOMGenerator::GenerateImagePlaneModule(vtkDICOMMetaData *source)
 
   // remove attributes that conflict with this module
   vtkDICOMMetaData *meta = this->MetaData;
-  meta->RemoveAttribute(DC::PixelAspectRatio);
-  meta->RemoveAttribute(DC::PatientOrientation);
+  meta->Erase(DC::PixelAspectRatio);
+  meta->Erase(DC::PatientOrientation);
 
-  meta->SetAttributeValue(
-    DC::PixelSpacing,
-    vtkDICOMValue(vtkDICOMVR::DS, spacing, 2));
+  meta->Set(DC::PixelSpacing, vtkDICOMValue(vtkDICOMVR::DS, spacing, 2));
 
   // this will have to account for image flip, if present
   int n = meta->GetNumberOfInstances();
@@ -1473,12 +1445,10 @@ bool vtkDICOMGenerator::GenerateImagePlaneModule(vtkDICOMMetaData *source)
     vtkDICOMGenerator::ComputePositionAndOrientation(
       origin, matrix, position, orientation);
 
-    meta->SetAttributeValue(
-      i, DC::ImagePositionPatient,
+    meta->Set(i, DC::ImagePositionPatient,
       vtkDICOMValue(vtkDICOMVR::DS, position, 3));
 
-    meta->SetAttributeValue(
-      i, DC::ImageOrientationPatient,
+    meta->Set(i, DC::ImageOrientationPatient,
       vtkDICOMValue(vtkDICOMVR::DS, orientation, 6));
 
     // location is optional, but useful
@@ -1495,15 +1465,14 @@ bool vtkDICOMGenerator::GenerateImagePlaneModule(vtkDICOMMetaData *source)
     if (this->SourceInstanceArray && source == this->SourceMetaData && source)
     {
       vtkDICOMMetaDataAdapter sourceAdapter(source);
-      if (sourceAdapter->HasAttribute(DC::SliceLocation))
+      if (sourceAdapter->Has(DC::SliceLocation))
       {
         int j = this->SourceInstanceArray->GetComponent(i, 0);
-        location = sourceAdapter->GetAttributeValue(
-          j, DC::SliceLocation).AsDouble();
+        location = sourceAdapter->Get(j, DC::SliceLocation).AsDouble();
       }
     }
 
-    meta->SetAttributeValue(i, DC::SliceLocation, location);
+    meta->Set(i, DC::SliceLocation, location);
   }
 
   // the original SliceThickness should be used if it is still valid,
@@ -1512,14 +1481,13 @@ bool vtkDICOMGenerator::GenerateImagePlaneModule(vtkDICOMMetaData *source)
   if (this->SourceInstanceArray && source == this->SourceMetaData && source)
   {
     vtkDICOMMetaDataAdapter sourceAdapter(source);
-    thickness = sourceAdapter->GetAttributeValue(
-      0, DC::SliceThickness).AsDouble();
+    thickness = sourceAdapter->Get(0, DC::SliceThickness).AsDouble();
   }
   if (thickness <= 0)
   {
     thickness = fabs(spacing[2]);
   }
-  meta->SetAttributeValue(DC::SliceThickness, thickness);
+  meta->Set(DC::SliceThickness, thickness);
 
   return true;
 }
@@ -1591,13 +1559,11 @@ bool vtkDICOMGenerator::GenerateImagePixelModule(vtkDICOMMetaData *source)
       vtkImageScalarTypeNameMacro(this->ScalarType));
   }
   // reduce BitsStored if the SOP class allows
-  unsigned int minv = static_cast<unsigned int>(-this->PixelValueRange[0]);
   unsigned int maxv = static_cast<unsigned int>(this->PixelValueRange[1]);
   for (int bi = pixelbits/2 + 1; bi < pixelbits; bi++)
   {
     if ((this->AllowedBitsStored & (1u << bi)) != 0 &&
-        ((pixelrep == 0 && maxv < (1u << (bi + 1))) ||
-         (pixelrep == 1 && maxv < (1u << bi) && minv <= (1u << bi))))
+        (pixelrep == 0 && maxv < (1u << (bi + 1))))
     {
       storedbits = bi + 1;
       break;
@@ -1615,22 +1581,21 @@ bool vtkDICOMGenerator::GenerateImagePixelModule(vtkDICOMMetaData *source)
   bool paletteColor = false;
   if (this->NumberOfColorComponents >= 3)
   {
-    meta->SetAttributeValue(DC::SamplesPerPixel, 3);
-    meta->SetAttributeValue(DC::PlanarConfiguration, 0);
-    meta->SetAttributeValue(DC::PhotometricInterpretation, "RGB");
+    meta->Set(DC::SamplesPerPixel, 3);
+    meta->Set(DC::PlanarConfiguration, 0);
+    meta->Set(DC::PhotometricInterpretation, "RGB");
   }
   else
   {
-    meta->SetAttributeValue(DC::SamplesPerPixel, 1);
+    meta->Set(DC::SamplesPerPixel, 1);
 
     std::string pm;
     if (source)
     {
-      pm = source->GetAttributeValue(
-        DC::PhotometricInterpretation).AsString();
+      pm = source->Get(DC::PhotometricInterpretation).AsString();
     }
     if ((pm == "PALETTE COLOR" || pm == "PALETTE_COLOR") &&
-        source && source->HasAttribute(DC::RedPaletteColorLookupTableData))
+        source && source->Has(DC::RedPaletteColorLookupTableData))
     {
       pm = "PALETTE COLOR";
       paletteColor = true;
@@ -1639,7 +1604,7 @@ bool vtkDICOMGenerator::GenerateImagePixelModule(vtkDICOMMetaData *source)
     {
       pm = "MONOCHROME2";
     }
-    meta->SetAttributeValue(DC::PhotometricInterpretation, pm);
+    meta->Set(DC::PhotometricInterpretation, pm);
   }
 
   if (paletteColor && source)
@@ -1655,26 +1620,23 @@ bool vtkDICOMGenerator::GenerateImagePixelModule(vtkDICOMMetaData *source)
     };
     for (int i = 0; palette[i] != DC::ItemDelimitationItem; i++)
     {
-      meta->SetAttributeValue(palette[i],
-        source->GetAttributeValue(palette[i]));
+      meta->Set(palette[i], source->Get(palette[i]));
     }
   }
 
-  meta->SetAttributeValue(DC::Rows, rows);
-  meta->SetAttributeValue(DC::Columns, cols);
-  meta->SetAttributeValue(DC::BitsAllocated, pixelbits);
-  meta->SetAttributeValue(DC::BitsStored, storedbits);
-  meta->SetAttributeValue(DC::HighBit, storedbits-1);
-  meta->SetAttributeValue(DC::PixelRepresentation, pixelrep);
+  meta->Set(DC::Rows, rows);
+  meta->Set(DC::Columns, cols);
+  meta->Set(DC::BitsAllocated, pixelbits);
+  meta->Set(DC::BitsStored, storedbits);
+  meta->Set(DC::HighBit, storedbits-1);
+  meta->Set(DC::PixelRepresentation, pixelrep);
 
   // This cannot be set if PixelSpacing is set
-  if (!meta->HasAttribute(DC::PixelSpacing))
+  if (!meta->Has(DC::PixelSpacing))
   {
     int aspect[2];
     vtkDICOMGenerator::ComputeAspectRatio(this->Spacing, aspect);
-    meta->SetAttributeValue(
-      DC::PixelAspectRatio,
-      vtkDICOMValue(vtkDICOMVR::IS, aspect, 2));
+    meta->Set(DC::PixelAspectRatio, vtkDICOMValue(vtkDICOMVR::IS, aspect, 2));
   }
 
   // The Smallest/LargestPixelValue are optional, but nice to have
@@ -1712,9 +1674,9 @@ bool vtkDICOMGenerator::GenerateImagePixelModule(vtkDICOMMetaData *source)
         maxVal = (maxVal >= v ? maxVal : v);
       }
 
-      meta->SetAttributeValue(
+      meta->Set(
         i, DC::SmallestImagePixelValue, vtkDICOMValue(pixelVR, minVal));
-      meta->SetAttributeValue(
+      meta->Set(
         i, DC::LargestImagePixelValue, vtkDICOMValue(pixelVR, maxVal));
     }
   }
@@ -1749,12 +1711,10 @@ bool vtkDICOMGenerator::GenerateContrastBolusModule(vtkDICOMMetaData *source)
 bool vtkDICOMGenerator::GenerateMultiFrameModule(vtkDICOMMetaData *)
 {
   vtkDICOMMetaData *meta = this->MetaData;
-  meta->SetAttributeValue(
-    DC::NumberOfFrames, this->NumberOfFrames);
-  meta->SetAttributeValue(
-    DC::FrameIncrementPointer,
+  meta->Set(DC::NumberOfFrames, this->NumberOfFrames);
+  meta->Set(DC::FrameIncrementPointer,
     vtkDICOMValue(vtkDICOMVR::AT, vtkDICOMTag(DC::FrameTime)));
-  meta->SetAttributeValue(DC::FrameTime, this->Spacing[4]);
+  meta->Set(DC::FrameTime, this->Spacing[4]);
 
   return true;
 }
@@ -1812,20 +1772,22 @@ bool vtkDICOMGenerator::GenerateOverlayPlaneModule(vtkDICOMMetaData *source)
 
   // overlay is a repeating group, it repeats 16 times
   DC::EnumType tags[16];
-  for (int i = 0; i < 16; i++)
+  int n = this->NumberOfOverlays;
+  n = (n < 0 ? 0 : n);
+  n = (n > 16 ? 16 : n);
+  for (int i = 0; i < n; i++)
   {
-    if (source && source->HasAttribute(vtkDICOMTag(0x6000 + i*2, 0x0010)))
+    int j = 0;
+    while (tags[j] != DC::ItemDelimitationItem)
     {
-      for (int j = 0; j < 12; j++)
-      {
-        tags[j] = static_cast<DC::EnumType>(basetags[j] + i*0x20000);
-      }
-      tags[13] = DC::ItemDelimitationItem;
+      tags[j] = static_cast<DC::EnumType>(basetags[j] + i*0x20000);
+      j++;
+    }
+    tags[j] = DC::ItemDelimitationItem;
 
-      if (!this->CopyOptionalAttributes(tags, source))
-      {
-        return false;
-      }
+    if (!this->CopyOptionalAttributes(tags, source))
+    {
+      return false;
     }
   }
 
@@ -1838,7 +1800,7 @@ bool vtkDICOMGenerator::GenerateVOILUTModule(vtkDICOMMetaData *source)
   // no support for lookup tables yet, so just Window/Level
 
   vtkDICOMMetaData *meta = this->MetaData;
-  if (!meta->HasAttribute(DC::RescaleIntercept) &&
+  if (!meta->Has(DC::RescaleIntercept) &&
       this->RangeArray &&
       (this->ScalarType == VTK_SHORT ||
        this->ScalarType == VTK_UNSIGNED_SHORT))
@@ -1866,8 +1828,8 @@ bool vtkDICOMGenerator::GenerateVOILUTModule(vtkDICOMMetaData *source)
           highVal--;
         }
       }
-      meta->SetAttributeValue(i, DC::WindowCenter, 0.5*(highVal + lowVal));
-      meta->SetAttributeValue(i, DC::WindowWidth, 1.0*(highVal - lowVal));
+      meta->Set(i, DC::WindowCenter, 0.5*(highVal + lowVal));
+      meta->Set(i, DC::WindowWidth, 1.0*(highVal - lowVal));
     }
 
     return true;

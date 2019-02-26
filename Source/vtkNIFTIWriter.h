@@ -12,28 +12,30 @@
      PURPOSE.  See the above copyright notice for more information.
 
 =========================================================================*/
-/*! \class vtkNIFTIWriter
- *  \brief Write NIfTI-1 and NIfTI-2 medical image files
+/**
+ * \class vtkNIFTIWriter
+ * \brief Write NIfTI-1 and NIfTI-2 medical image files
  *
- *  This class writes NIFTI files, either in .nii format or as separate
- *  .img and .hdr files.  If told to write a file that ends in ".gz",
- *  then the writer will automatically compress the file with zlib.
- *  Images of type unsigned char that have 3 or 4 scalar components
- *  will automatically be written as RGB or RGBA respectively.  Images
- *  of type float or double that have 2 components will automatically be
- *  written as complex values.
+ * This class writes NIFTI files, either in .nii format or as separate
+ * .img and .hdr files.  If told to write a file that ends in ".gz",
+ * then the writer will automatically compress the file with zlib.
+ * Images of type unsigned char that have 3 or 4 scalar components
+ * will automatically be written as RGB or RGBA respectively.  Images
+ * of type float or double that have 2 components will automatically be
+ * written as complex values.
  *
- *  This class was contributed to VTK by the Calgary Image Processing and
- *  Analysis Centre (CIPAC).
+ * This class was contributed to VTK by the Calgary Image Processing and
+ * Analysis Centre (CIPAC).
  *
- *  \sa vtkNIFTIReader
+ * \sa vtkNIFTIReader
  */
 
 #ifndef vtkNIFTIWriter_h
 #define vtkNIFTIWriter_h
 
-#include <vtkImageWriter.h>
+#include "vtkImageWriter.h"
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
 
 class vtkMatrix4x4;
 class vtkNIFTIHeader;
@@ -53,11 +55,7 @@ public:
   vtkTypeMacro(vtkNIFTIWriter, vtkImageWriter);
 
   //! Print information about this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
 
   //@{
   //! Set the version number for the NIfTI file format to use.
@@ -144,7 +142,7 @@ public:
   /*!
    *  Unlike the qform matrix, the sform matrix can contain scaling
    *  information.  Before being stored in the NIFTI header, the
-   *  first three columns of the matrix will be multipled by the voxel
+   *  first three columns of the matrix will be multiplied by the voxel
    *  spacing. In the NIFTI header, the sform_code will be set to 2.
    */
   void SetSFormMatrix(vtkMatrix4x4 *);
@@ -189,15 +187,9 @@ protected:
   int GenerateHeader(vtkInformation *info, bool singleFile);
 
   //! The main execution method, which writes the file.
-#ifdef VTK_OVERRIDE
   int RequestData(vtkInformation *request,
                   vtkInformationVector** inputVector,
-                  vtkInformationVector* outputVector) VTK_OVERRIDE;
-#else
-  int RequestData(vtkInformation *request,
-                  vtkInformationVector** inputVector,
-                  vtkInformationVector* outputVector);
-#endif
+                  vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
 
   //! Make a new filename by replacing extension "ext1" with "ext2".
   /*!
@@ -238,12 +230,12 @@ protected:
   EndianEnum DataByteOrder;
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkNIFTIWriter(const vtkNIFTIWriter&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkNIFTIWriter&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkNIFTIWriter(const vtkNIFTIWriter&) VTK_DICOM_DELETE;
+  void operator=(const vtkNIFTIWriter&) VTK_DICOM_DELETE;
 #else
-  vtkNIFTIWriter(const vtkNIFTIWriter&);
-  void operator=(const vtkNIFTIWriter&);
+  vtkNIFTIWriter(const vtkNIFTIWriter&) = delete;
+  void operator=(const vtkNIFTIWriter&) = delete;
 #endif
 };
 

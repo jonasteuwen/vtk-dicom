@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -14,8 +14,9 @@
 #ifndef vtkDICOMCompiler_h
 #define vtkDICOMCompiler_h
 
-#include <vtkObject.h>
+#include "vtkObject.h"
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
 
 
 class vtkStringArray;
@@ -38,11 +39,7 @@ public:
   vtkTypeMacro(vtkDICOMCompiler, vtkObject);
 
   //! Print a summary of the contents of this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
 
   //@{
   //! Set the file name.
@@ -273,12 +270,12 @@ protected:
   friend class vtkDICOMCompilerInternalFriendship;
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMCompiler(const vtkDICOMCompiler&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMCompiler&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMCompiler(const vtkDICOMCompiler&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMCompiler&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMCompiler(const vtkDICOMCompiler&);
-  void operator=(const vtkDICOMCompiler&);
+  vtkDICOMCompiler(const vtkDICOMCompiler&) = delete;
+  void operator=(const vtkDICOMCompiler&) = delete;
 #endif
 };
 

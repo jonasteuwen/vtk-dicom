@@ -12,30 +12,32 @@
      PURPOSE.  See the above copyright notice for more information.
 
 =========================================================================*/
-/*! \class vtkNIFTIReader
- *  \brief Read NIfTI-1 and NIfTI-2 medical image files
+/**
+ * \class vtkNIFTIReader
+ * \brief Read NIfTI-1 and NIfTI-2 medical image files
  *
- *  This class reads NIFTI files, either in .nii format or as separate
- *  .img and .hdr files.  If two files are used, then they can be passed
- *  by using SetFileNames() instead of SetFileName().  Files ending in .gz
- *  are decompressed on-the-fly while they are being read.  Files with
- *  complex numbers or vector dimensions will be read as multi-component
- *  images.  If a NIFTI file has a time dimension, then by default only the
- *  first image in the time series will be read, but the TimeAsVector
- *  flag can be set to read the time steps as vector components.  Files in
- *  Analyze 7.5 format are also supported by this reader.
+ * This class reads NIFTI files, either in .nii format or as separate
+ * .img and .hdr files.  If two files are used, then they can be passed
+ * by using SetFileNames() instead of SetFileName().  Files ending in .gz
+ * are decompressed on-the-fly while they are being read.  Files with
+ * complex numbers or vector dimensions will be read as multi-component
+ * images.  If a NIFTI file has a time dimension, then by default only the
+ * first image in the time series will be read, but the TimeAsVector
+ * flag can be set to read the time steps as vector components.  Files in
+ * Analyze 7.5 format are also supported by this reader.
  *
- *  This class was contributed to VTK by the Calgary Image Processing and
- *  Analysis Centre (CIPAC).
+ * This class was contributed to VTK by the Calgary Image Processing and
+ * Analysis Centre (CIPAC).
  *
- *  \sa vtkNIFTIWriter, vtkNIFTIHeader
+ * \sa vtkNIFTIWriter, vtkNIFTIHeader
  */
 
 #ifndef vtkNIFTIReader_h
 #define vtkNIFTIReader_h
 
-#include <vtkImageReader2.h>
+#include "vtkImageReader2.h"
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
 
 class vtkNIFTIHeader;
 class vtkMatrix4x4;
@@ -51,39 +53,20 @@ public:
   vtkTypeMacro(vtkNIFTIReader, vtkImageReader2);
 
   //! Print information about this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
 
-#ifdef VTK_OVERRIDE
   //@{
   //! Valid extensions for this file type.
-  const char* GetFileExtensions() VTK_OVERRIDE {
+  const char* GetFileExtensions() VTK_DICOM_OVERRIDE {
     return ".nii .nii.gz .img .img.gz .hdr .hdr.gz"; }
 
   //! Return a descriptive name that might be useful in a GUI.
-  const char* GetDescriptiveName() VTK_OVERRIDE {
+  const char* GetDescriptiveName() VTK_DICOM_OVERRIDE {
     return "NIfTI"; }
 
   //! Return true if this reader can read the given file.
-  int CanReadFile(const char* filename) VTK_OVERRIDE;
+  int CanReadFile(const char* filename) VTK_DICOM_OVERRIDE;
   //@}
-#else
-  //@{
-  //! Valid extensions for this file type.
-  const char* GetFileExtensions() {
-    return ".nii .nii.gz .img .img.gz .hdr .hdr.gz"; }
-
-  //! Return a descriptive name that might be useful in a GUI.
-  const char* GetDescriptiveName() {
-    return "NIfTI"; }
-
-  //! Return true if this reader can read the given file.
-  int CanReadFile(const char* filename);
-  //@}
-#endif
 
   //@{
   //! Read the time dimension as scalar components (default: Off).
@@ -132,8 +115,8 @@ public:
   //@{
   //! QFac gives the slice order in the NIFTI file versus the VTK image.
   /*!
-   *  If QFac is -1, then the VTK slice index J is related to the NIFTI
-   *  slice index j by the equation J = (num_slices - j - 1).  VTK requires
+   *  If QFac is -1, then the VTK slice index K is related to the NIFTI
+   *  slice index k by the equation K = (num_slices - k - 1).  VTK requires
    *  the slices to be ordered so that the voxel indices (I,J,K) provide a
    *  right-handed coordinate system, whereas NIFTI does not.  Instead,
    *  NIFTI stores a factor called "qfac" in the header to signal when the
@@ -184,27 +167,15 @@ protected:
   vtkNIFTIReader();
   ~vtkNIFTIReader();
 
-#ifdef VTK_OVERRIDE
   //! Read the header information.
   int RequestInformation(
     vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector) VTK_OVERRIDE;
+    vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
 
   //! Read the voxel data.
   int RequestData(
     vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector) VTK_OVERRIDE;
-#else
-  //! Read the header information.
-  int RequestInformation(
-    vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector);
-
-  //! Read the voxel data.
-  int RequestData(
-    vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector);
-#endif
+    vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
 
   //! Doe a case-insensitive check for the given extension.
   /*!
@@ -257,12 +228,12 @@ protected:
   bool PlanarRGB;
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkNIFTIReader(const vtkNIFTIReader&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkNIFTIReader&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkNIFTIReader(const vtkNIFTIReader&) VTK_DICOM_DELETE;
+  void operator=(const vtkNIFTIReader&) VTK_DICOM_DELETE;
 #else
-  vtkNIFTIReader(const vtkNIFTIReader&);
-  void operator=(const vtkNIFTIReader&);
+  vtkNIFTIReader(const vtkNIFTIReader&) = delete;
+  void operator=(const vtkNIFTIReader&) = delete;
 #endif
 };
 

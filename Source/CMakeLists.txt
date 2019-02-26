@@ -3,6 +3,20 @@ set(DICOM_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 set(DICOM_BUILD_TESTING ${BUILD_TESTING})
 set(DICOM_USE_GDCM ${USE_GDCM})
 set(DICOM_USE_DCMTK ${USE_DCMTK})
+set(DICOM_USE_SQLITE ${USE_SQLITE})
+if(${VTK_VERSION} VERSION_LESS 7.0)
+  set(DICOM_OVERRIDE "")
+  set(DICOM_DELETE "")
+elseif(${VTK_VERSION} VERSION_LESS 7.1)
+  set(DICOM_OVERRIDE " VTK_OVERRIDE")
+  set(DICOM_DELETE "")
+elseif(${VTK_VERSION} VERSION_LESS 8.90)
+  set(DICOM_OVERRIDE " VTK_OVERRIDE")
+  set(DICOM_DELETE " VTK_DELETE_FUNCTION")
+else()
+  set(DICOM_OVERRIDE " override")
+  set(DICOM_DELETE " = delete")
+endif()
 configure_file(${DICOM_CMAKE_DIR}/vtkDICOMConfig.h.in
   "${CMAKE_CURRENT_BINARY_DIR}/vtkDICOMConfig.h" @ONLY)
 configure_file(${DICOM_CMAKE_DIR}/vtkDICOMBuild.h.in
@@ -32,6 +46,7 @@ set(LIB_SRCS
   vtkDICOMVR.cxx
   vtkDICOMVM.cxx
   vtkDICOMCharacterSet.cxx
+  vtkDICOMCharacterSetTables.cxx
   vtkDICOMDataElement.cxx
   vtkDICOMDictHash.cxx
   vtkDICOMDictEntry.cxx
@@ -99,6 +114,7 @@ set(LIB_SPECIAL
   vtkDICOMVR.cxx
   vtkDICOMVM.cxx
   vtkDICOMCharacterSet.cxx
+  vtkDICOMCharacterSetTables.cxx
   vtkDICOMDictEntry.cxx
   vtkDICOMDictHash.cxx
   vtkDICOMDictionary.cxx
@@ -120,13 +136,26 @@ set_source_files_properties(${LIB_ABSTRACT}
 set_source_files_properties(${LIB_PRIVATE_HDRS}
   PROPERTIES SKIP_HEADER_INSTALL ON)
 
-if(Module_vtkDICOM) # Building as a VTK remote module
+if(DEFINED VTK_MODULE_ENABLE_VTK_DICOM)
+  # When building as a remote module for VTK 9 (or VTK 8.90+)
+  set(LIB_SRC_HDRS)
+  foreach(_src ${LIB_SRCS})
+    get_filename_component(_base ${_src} NAME_WE)
+    list(APPEND LIB_SRC_HDRS ${_base}.h)
+  endforeach()
+  vtk_module_add_module(VTK::DICOM
+    SOURCES ${LIB_SRCS}
+    HEADERS ${LIB_SRC_HDRS} ${LIB_HDRS})
+  vtk_module_link(VTK::DICOM
+    PRIVATE ${GDCM_LIBS} ${DCMTK_LIBS} ${SQLITE_LIBS})
 
+elseif(Module_vtkDICOM)
+  # When building as a remote module for older versions of VTK
   vtk_module_library(vtkDICOM ${LIB_SRCS} ${LIB_HDRS})
   target_link_libraries(${LIB_NAME}
-    LINK_PRIVATE ${GDCM_LIBS} ${DCMTK_LIBS})
+    LINK_PRIVATE ${GDCM_LIBS} ${DCMTK_LIBS} ${SQLITE_LIBS})
 
-else() # else MODULE_vtkDICOM
+else()
 
 configure_file(${DICOM_CMAKE_DIR}/vtkDICOMModule.h.in
   "${CMAKE_CURRENT_BINARY_DIR}/vtkDICOMModule.h" COPYONLY)
@@ -146,7 +175,7 @@ if("${VTK_MAJOR_VERSION}" GREATER 5)
     set_source_files_properties(${LIB_SPECIAL} PROPERTIES WRAP_SPECIAL ON)
     set(MODULE_HIERARCHY_NAME ${LIB_NAME}Hierarchy)
     # _LINK_DEPENDS is a variable suffix from the VTK 6 module macros
-    set(${LIB_NAME}_LINK_DEPENDS ${VTK_LIBS} ${KWSYS_LIBS} ${ZLIB_LIBS})
+    set(${LIB_NAME}_LINK_DEPENDS ${VTK_LIBS} ${ZLIB_LIBS})
     include(vtkWrapHierarchy)
     vtk_wrap_hierarchy(${LIB_NAME} ${CMAKE_CURRENT_BINARY_DIR} "${LIB_SRCS}")
     set(KIT_HIERARCHY_FILE ${CMAKE_CURRENT_BINARY_DIR}/${MODULE_HIERARCHY_NAME}.txt)
@@ -175,64 +204,81 @@ if(BUILD_PYTHON_WRAPPERS OR BUILD_TCL_WRAPPERS OR BUILD_JAVA_WRAPPERS AND
 endif()
 target_link_libraries(${LIB_NAME} LINK_PUBLIC ${VTK_LIBS})
 target_link_libraries(${LIB_NAME} LINK_PRIVATE
-  ${KWSYS_LIBS} ${ZLIB_LIBS} ${GDCM_LIBS} ${DCMTK_LIBS})
+  ${ZLIB_LIBS} ${GDCM_LIBS} ${DCMTK_LIBS} ${SQLITE_LIBS})
 
 # Wrappers
 if(BUILD_PYTHON_WRAPPERS)
-  set(XY) # Get python version, e.g. 27 for python 2.7
-  if(vtkPython_LIBRARIES)
-    list(GET vtkPython_LIBRARIES 0 TMP_LIB_NAME)
-    get_filename_component(TMP_NAME "${TMP_LIB_NAME}" NAME)
-    string(REGEX REPLACE "^[^0-9]*([0-9])\\.*([0-9]).*$" "\\1\\2"
-      XY "${TMP_NAME}")
-    if(NOT XY)
-      set(XY)
+  set(MODULE_PYTHON_NAME ${LIB_NAME}Python)
+  set(${LIB_NAME}_WRAP_DEPENDS ${VTK_LIBS})
+  if("${VTK_MAJOR_VERSION}" GREATER 5)
+    include(vtkWrapPython)
+    include_directories(${vtkPython_INCLUDE_DIRS})
+    set(VTK_PYTHON_LIBRARIES ${vtkPython_LIBRARIES})
+    set(LIB_PYTHON_LIBS vtkWrappingPythonCore)
+  else()
+    # Tell vtkWrapPython to locate the python libraries for us.
+    set(VTK_WRAP_PYTHON_FIND_LIBS ON)
+    include(vtkWrapPython)
+    if(VTK_PYTHON_INCLUDE_DIR)
+      include_directories("${VTK_PYTHON_INCLUDE_DIR}")
+    endif()
+    set(LIB_PYTHON_LIBS vtkPythonCore)
+  endif()
+  vtk_wrap_python3(${MODULE_PYTHON_NAME} LIB_PYTHON_SRCS "${LIB_SRCS}")
+  if(DICOM_PYTHON_LIBRARIES)
+    # do things the old way, with PythonD libraries
+    set(XY) # Get python version, e.g. 27 for python 2.7
+    if(vtkPython_LIBRARIES)
+      list(GET vtkPython_LIBRARIES 0 TMP_LIB_NAME)
+      get_filename_component(TMP_NAME "${TMP_LIB_NAME}" NAME)
+      string(REGEX REPLACE "^[^0-9]*([0-9])\\.*([0-9]).*$" "\\1\\2"
+        XY "${TMP_NAME}")
+      if(NOT XY)
+        set(XY)
+      endif()
+    endif()
+    set(LIB_PYTHON_NAME ${LIB_NAME}PythonD)
+    set(LIB_PYTHON_OUTPUT_NAME ${LIB_NAME}Python${XY}D)
+    if("${VTK_MAJOR_VERSION}" GREATER 5)
+      set(LIB_PYTHON_OUTPUT_NAME ${LIB_PYTHON_OUTPUT_NAME}${LIB_NAME_SUFFIX})
+    endif()
+    foreach(TMP_LIB ${VTK_LIBS})
+      set(LIB_PYTHON_LIBS ${LIB_PYTHON_LIBS} ${TMP_LIB}PythonD)
+    endforeach()
+    add_library(${LIB_PYTHON_NAME} ${LIB_PYTHON_SRCS} ${LIB_PYTHON_EXTRA_SRCS})
+    if(NOT (CMAKE_VERSION VERSION_LESS 2.8))
+      set_target_properties(${LIB_PYTHON_NAME} PROPERTIES
+        POSITION_INDEPENDENT_CODE ON)
+    endif()
+    set_target_properties(${LIB_PYTHON_NAME} PROPERTIES
+      VERSION "${PROJECT_VERSION}"
+      SOVERSION "${PROJECT_MAJOR_VERSION}.${PROJECT_MINOR_VERSION}"
+      OUTPUT_NAME "${LIB_PYTHON_OUTPUT_NAME}")
+    target_link_libraries(${LIB_PYTHON_NAME} LINK_PUBLIC
+      ${LIB_NAME} ${LIB_PYTHON_LIBS})
+    # On Win32 and Mac, link python library non-private
+    if(WIN32 OR APPLE)
+      target_link_libraries(${LIB_PYTHON_NAME} LINK_PUBLIC
+        ${VTK_PYTHON_LIBRARIES})
+    else()
+      target_link_libraries(${LIB_PYTHON_NAME} LINK_PRIVATE
+        ${VTK_PYTHON_LIBRARIES})
+    endif()
+    if(KIT_PYTHON_DEPS)
+      add_dependencies(${LIB_PYTHON_NAME} ${KIT_PYTHON_DEPS})
+    endif()
+    add_library(${MODULE_PYTHON_NAME} MODULE ${MODULE_PYTHON_NAME}Init.cxx)
+    target_link_libraries(${MODULE_PYTHON_NAME} ${LIB_PYTHON_NAME})
+  else()
+    # do things the new way, without PythonD libraries
+    add_library(${MODULE_PYTHON_NAME} MODULE ${MODULE_PYTHON_NAME}Init.cxx
+      ${LIB_PYTHON_SRCS} ${LIB_PYTHON_EXTRA_SRCS})
+    target_link_libraries(${MODULE_PYTHON_NAME} LINK_PRIVATE
+      ${LIB_NAME} ${LIB_PYTHON_LIBS} ${VTK_PYTHON_LIBRARIES})
+    if(KIT_PYTHON_DEPS)
+      add_dependencies(${MODULE_PYTHON_NAME} ${KIT_PYTHON_DEPS})
     endif()
   endif()
-  set(MODULE_PYTHON_NAME ${LIB_NAME}Python)
-  set(LIB_PYTHON_NAME ${LIB_NAME}PythonD)
-  set(LIB_PYTHON_OUTPUT_NAME ${LIB_NAME}Python${XY}D)
-  if("${VTK_MAJOR_VERSION}" GREATER 5)
-    set(LIB_PYTHON_OUTPUT_NAME ${LIB_PYTHON_OUTPUT_NAME}${LIB_NAME_SUFFIX})
-  endif()
-  set(LIB_PYTHON_LIBS vtkPythonCore)
-  if("${VTK_MAJOR_VERSION}" GREATER 5)
-    set(LIB_PYTHON_LIBS vtkWrappingPythonCore)
-  endif()
-  foreach(TMP_LIB ${VTK_LIBS})
-    set(LIB_PYTHON_LIBS ${LIB_PYTHON_LIBS} ${TMP_LIB}PythonD)
-  endforeach()
-
-  if(VTK_PYTHON_INCLUDE_DIR)
-    include_directories("${VTK_PYTHON_INCLUDE_DIR}")
-  endif()
-  # Tell vtkWrapPython to locate the python libraries for us.
-  set(VTK_WRAP_PYTHON_FIND_LIBS ON)
-  include(vtkWrapPython)
-  vtk_wrap_python3(${MODULE_PYTHON_NAME} LIB_PYTHON_SRCS "${LIB_SRCS}")
-  add_library(${LIB_PYTHON_NAME} ${LIB_PYTHON_SRCS} ${LIB_PYTHON_EXTRA_SRCS})
-  if(NOT (CMAKE_VERSION VERSION_LESS 2.8))
-    set_target_properties(${LIB_PYTHON_NAME} PROPERTIES
-      POSITION_INDEPENDENT_CODE ON)
-  endif()
-  set_target_properties(${LIB_PYTHON_NAME} PROPERTIES
-    VERSION "${PROJECT_VERSION}"
-    SOVERSION "${PROJECT_MAJOR_VERSION}.${PROJECT_MINOR_VERSION}"
-    OUTPUT_NAME "${LIB_PYTHON_OUTPUT_NAME}")
-  target_link_libraries(${LIB_PYTHON_NAME} LINK_PUBLIC
-    ${LIB_NAME} ${LIB_PYTHON_LIBS})
-  # On Win32 and Mac, link python library non-private
-  if(WIN32 OR APPLE)
-    target_link_libraries(${LIB_PYTHON_NAME} LINK_PUBLIC
-      ${VTK_PYTHON_LIBRARIES})
-  else()
-    target_link_libraries(${LIB_PYTHON_NAME} LINK_PRIVATE
-      ${VTK_PYTHON_LIBRARIES})
-  endif()
-  if(KIT_PYTHON_DEPS)
-    add_dependencies(${LIB_PYTHON_NAME} ${KIT_PYTHON_DEPS})
-  endif()
-  add_library(${MODULE_PYTHON_NAME} MODULE ${MODULE_PYTHON_NAME}Init.cxx)
   set_target_properties(${MODULE_PYTHON_NAME} PROPERTIES PREFIX "")
   if(WIN32 AND NOT CYGWIN)
     set_target_properties(${MODULE_PYTHON_NAME} PROPERTIES SUFFIX ".pyd")
@@ -240,7 +286,6 @@ if(BUILD_PYTHON_WRAPPERS)
   if(CMAKE_VERSION VERSION_GREATER 2.8.8)
     set_target_properties(${MODULE_PYTHON_NAME} PROPERTIES NO_SONAME 1)
   endif()
-  target_link_libraries(${MODULE_PYTHON_NAME} ${LIB_PYTHON_NAME})
 endif()
 
 if(BUILD_TCL_WRAPPERS)

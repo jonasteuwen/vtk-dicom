@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -14,9 +14,10 @@
 #ifndef vtkDICOMMetaData_h
 #define vtkDICOMMetaData_h
 
-#include <vtkDataObject.h>
-#include <vtkStdString.h> // For std::string
+#include "vtkDataObject.h"
+#include "vtkStdString.h" // For std::string
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
 #include "vtkDICOMDataElement.h" // For method parameter
 #include "vtkDICOMDictEntry.h" // For method parameter
 
@@ -39,11 +40,7 @@ public:
   vtkTypeMacro(vtkDICOMMetaData, vtkDataObject);
 
   //! Print a summary of the contents of this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
 
   //@{
   //! Get the number of instances (i.e. files).
@@ -63,11 +60,7 @@ public:
   void Clear();
 
   //! Remove all data elements and initialize all members.
-#ifdef VTK_OVERRIDE
-  void Initialize() VTK_OVERRIDE;
-#else
-  void Initialize();
-#endif
+  void Initialize() VTK_DICOM_OVERRIDE;
   //@}
 
   //@{
@@ -96,23 +89,30 @@ public:
 
   //@{
   //! Check whether an attribute is present in the metadata.
-  bool HasAttribute(vtkDICOMTag tag);
+  bool Has(vtkDICOMTag tag);
+  bool HasAttribute(vtkDICOMTag tag) {
+    return this->Has(tag); }
 
   //! Erase an attribute.
-  void RemoveAttribute(vtkDICOMTag tag);
+  void Erase(vtkDICOMTag tag);
+  void RemoveAttribute(vtkDICOMTag tag) {
+    this->Erase(tag); }
   //@}
 
   //@{
   //! Get an attribute value.
   /*!
    *  The tag will usually be specified in one of these two ways:
-   *  GetAttributeValue(vtkDICOMTag(0x0008,0x1030)) or, using the
-   *  dictionary enum type, GetAttributeValue(DC::StudyDescription).
-   *  If the attribute is not present, then the returned value will
-   *  be invalid, i.e. v.IsValid() will be false.
+   *  Get(vtkDICOMTag(0x0008,0x1030)) or, using the dictionary enum type,
+   *  Get(DC::StudyDescription).  If the attribute is not present, then
+   *  the returned value will be invalid, i.e. v.IsValid() will be false.
    */
-  const vtkDICOMValue &GetAttributeValue(vtkDICOMTag tag);
-  const vtkDICOMValue &GetAttributeValue(const vtkDICOMTagPath &p);
+  const vtkDICOMValue &Get(vtkDICOMTag tag);
+  const vtkDICOMValue &Get(const vtkDICOMTagPath &p);
+  const vtkDICOMValue &GetAttributeValue(vtkDICOMTag tag) {
+    return this->Get(tag); }
+  const vtkDICOMValue &GetAttributeValue(const vtkDICOMTagPath &p) {
+    return this->Get(p); }
   //@}
 
   //@{
@@ -124,8 +124,12 @@ public:
    *  is not present, the value will be invalid, i.e. v.IsValid()
    *  will be false.
    */
-  const vtkDICOMValue &GetAttributeValue(int idx, vtkDICOMTag tag);
-  const vtkDICOMValue &GetAttributeValue(int idx, const vtkDICOMTagPath &p);
+  const vtkDICOMValue &Get(int idx, vtkDICOMTag tag);
+  const vtkDICOMValue &Get(int idx, const vtkDICOMTagPath &p);
+  const vtkDICOMValue &GetAttributeValue(int idx, vtkDICOMTag tag) {
+    return this->Get(idx, tag); }
+  const vtkDICOMValue &GetAttributeValue(int idx, const vtkDICOMTagPath &p) {
+    return this->Get(idx, p); }
   //@}
 
   //@{
@@ -140,9 +144,13 @@ public:
    *  It can be used on either multi-frame or single-frame files.
    *  The frame index is counted from zero to NumberOfFrames-1.
    */
-  const vtkDICOMValue &GetAttributeValue(int idx, int frame, vtkDICOMTag tag);
+  const vtkDICOMValue &Get(int idx, int frame, vtkDICOMTag tag);
+  const vtkDICOMValue &Get(int idx, int frame, const vtkDICOMTagPath &p);
+  const vtkDICOMValue &GetAttributeValue(int idx, int frame, vtkDICOMTag tag) {
+    return this->Get(idx, frame, tag); }
   const vtkDICOMValue &GetAttributeValue(
-    int idx, int frame, const vtkDICOMTagPath &p);
+    int idx, int frame, const vtkDICOMTagPath &p) {
+    return this->Get(idx, frame, p); }
   //@}
 
   //@{
@@ -183,16 +191,28 @@ public:
    *  ASCII string, or it must be encoded in the SpecificCharacterSet
    *  for this data set.
    */
-  void SetAttributeValue(int idx, vtkDICOMTag tag, const vtkDICOMValue& v);
-  void SetAttributeValue(int idx, vtkDICOMTag tag, double v);
-  void SetAttributeValue(int idx, vtkDICOMTag tag, const std::string& v);
+  void Set(int idx, vtkDICOMTag tag, const vtkDICOMValue& v);
+  void Set(int idx, vtkDICOMTag tag, double v);
+  void Set(int idx, vtkDICOMTag tag, const std::string& v);
+  void SetAttributeValue(int idx, vtkDICOMTag tag, const vtkDICOMValue& v) {
+    this->Set(idx, tag, v); }
+  void SetAttributeValue(int idx, vtkDICOMTag tag, double v) {
+    this->Set(idx, tag, v); }
+  void SetAttributeValue(int idx, vtkDICOMTag tag, const std::string& v) {
+    this->Set(idx, tag, v); }
   //@}
 
   //@{
   //! Set the same attribute value for all images.
-  void SetAttributeValue(vtkDICOMTag tag, const vtkDICOMValue& v);
-  void SetAttributeValue(vtkDICOMTag tag, double v);
-  void SetAttributeValue(vtkDICOMTag tag, const std::string& v);
+  void Set(vtkDICOMTag tag, const vtkDICOMValue& v);
+  void Set(vtkDICOMTag tag, double v);
+  void Set(vtkDICOMTag tag, const std::string& v);
+  void SetAttributeValue(vtkDICOMTag tag, const vtkDICOMValue& v) {
+    this->Set(tag, v); }
+  void SetAttributeValue(vtkDICOMTag tag, double v) {
+    this->Set(tag, v); }
+  void SetAttributeValue(vtkDICOMTag tag, const std::string& v) {
+    this->Set(tag, v); }
   //@}
 
   //@{
@@ -203,19 +223,31 @@ public:
    *  will be created.  If an item index in the path points to an item that
    *  does not exist, then that item will be created.
    */
+  void Set(int idx, const vtkDICOMTagPath& tag, const vtkDICOMValue& v);
+  void Set(int idx, const vtkDICOMTagPath& tag, double v);
+  void Set(int idx, const vtkDICOMTagPath& tag, const std::string& v);
   void SetAttributeValue(
-    int idx, const vtkDICOMTagPath& tag, const vtkDICOMValue& v);
+    int idx, const vtkDICOMTagPath& tag, const vtkDICOMValue& v) {
+    this->Set(idx, tag, v); }
   void SetAttributeValue(
-    int idx, const vtkDICOMTagPath& tag, double v);
+    int idx, const vtkDICOMTagPath& tag, double v) {
+    this->Set(idx, tag, v); }
   void SetAttributeValue(
-    int idx, const vtkDICOMTagPath& tag, const std::string& v);
+    int idx, const vtkDICOMTagPath& tag, const std::string& v) {
+    this->Set(idx, tag, v); }
   //@}
 
   //@{
   //! Set the attribute value along this path for all images.
-  void SetAttributeValue(const vtkDICOMTagPath& tag, const vtkDICOMValue& v);
-  void SetAttributeValue(const vtkDICOMTagPath& tag, double v);
-  void SetAttributeValue(const vtkDICOMTagPath& tag, const std::string& v);
+  void Set(const vtkDICOMTagPath& tag, const vtkDICOMValue& v);
+  void Set(const vtkDICOMTagPath& tag, double v);
+  void Set(const vtkDICOMTagPath& tag, const std::string& v);
+  void SetAttributeValue(const vtkDICOMTagPath& tag, const vtkDICOMValue& v) {
+    this->Set(tag, v); }
+  void SetAttributeValue(const vtkDICOMTagPath& tag, double v) {
+    this->Set(tag, v); }
+  void SetAttributeValue(const vtkDICOMTagPath& tag, const std::string& v) {
+    this->Set(tag, v); }
   //@}
 
   //@{
@@ -230,6 +262,8 @@ public:
    *  read DICOM Part 5 Section 7.8 for additional information.
    */
   vtkDICOMTag ResolvePrivateTag(vtkDICOMTag ptag, const std::string& creator);
+  vtkDICOMTag ResolvePrivateTag(
+    int idx, vtkDICOMTag ptag, const std::string& creator);
 
   //! Resolve a private tag, and add the creator to the data set.
   /*!
@@ -241,6 +275,8 @@ public:
    */
   vtkDICOMTag ResolvePrivateTagForWriting(
     vtkDICOMTag ptag, const std::string& creator);
+  vtkDICOMTag ResolvePrivateTagForWriting(
+    int idx, vtkDICOMTag ptag, const std::string& creator);
   //@}
 
   //@{
@@ -288,13 +324,8 @@ public:
 
   //@{
   //! DataObject interface function.
-#ifdef VTK_OVERRIDE
-  void ShallowCopy(vtkDataObject *source) VTK_OVERRIDE;
-  void DeepCopy(vtkDataObject *source) VTK_OVERRIDE;
-#else
-  void ShallowCopy(vtkDataObject *source);
-  void DeepCopy(vtkDataObject *source);
-#endif
+  void ShallowCopy(vtkDataObject *source) VTK_DICOM_OVERRIDE;
+  void DeepCopy(vtkDataObject *source) VTK_DICOM_OVERRIDE;
   //@}
 
 protected:
@@ -344,12 +375,12 @@ private:
   //! An array to map slices and components to frames.
   vtkIntArray *FrameIndexArray;
 
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMMetaData(const vtkDICOMMetaData&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMMetaData&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMMetaData(const vtkDICOMMetaData&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMMetaData&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMMetaData(const vtkDICOMMetaData&);
-  void operator=(const vtkDICOMMetaData&);
+  vtkDICOMMetaData(const vtkDICOMMetaData&) = delete;
+  void operator=(const vtkDICOMMetaData&) = delete;
 #endif
 };
 

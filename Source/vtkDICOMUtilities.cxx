@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -12,9 +12,9 @@
 
 =========================================================================*/
 
-#include <vtkSystemIncludes.h>
-#include <vtkStringArray.h>
-#include <vtkObjectFactory.h>
+#include "vtkSystemIncludes.h"
+#include "vtkStringArray.h"
+#include "vtkObjectFactory.h"
 #include "vtkDICOMUtilities.h"
 #include "vtkDICOMUIDGenerator.h"
 #include "vtkDICOMFile.h"
@@ -24,7 +24,6 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <ctype.h>
 
 // needed for gettimeofday
 #ifndef _WIN32
@@ -71,8 +70,8 @@ int vtkDICOMUtilities::CompareUIDs(const char *u1, const char *u2)
     {
       int i1 = 0;
       int i2 = 0;
-      do { i1++; } while (isdigit(u1[i1]));
-      do { i2++; } while (isdigit(u2[i2]));
+      do { i1++; } while (u1[i1] >= '0' && u1[i1] <= '9');
+      do { i2++; } while (u2[i2] >= '0' && u2[i2] <= '9');
       r = i1 - i2; // longer number wins
       if (r == 0)
       { // lexically compare numbers of the same length
@@ -98,7 +97,7 @@ int vtkDICOMUtilities::CompareUIDs(const char *u1, const char *u2)
 }
 
 //----------------------------------------------------------------------------
-long long vtkDICOMUtilities::GetUTC(long long *offset)
+long long vtkDICOMUtilities::GetUniversalTime()
 {
 #ifdef _WIN32
 
@@ -107,31 +106,6 @@ long long vtkDICOMUtilities::GetUTC(long long *offset)
   long long t1 = ((static_cast<long long>(ft.dwHighDateTime) << 32) +
                   static_cast<long long>(ft.dwLowDateTime));
 
-  if (offset)
-  {
-    // get the current timezone offset by subtracting UTC from local time
-    TIME_ZONE_INFORMATION tzi;
-    GetTimeZoneInformation(&tzi);
-    SYSTEMTIME st;
-    FileTimeToSystemTime(&ft, &st);
-    SYSTEMTIME lst;
-    SystemTimeToTzSpecificLocalTime(&tzi, &st, &lst);
-    FILETIME lft;
-    SystemTimeToFileTime(&lst, &lft);
-    // round to the nearest second, since result has a bit of numerical error
-    long long tzo = ((static_cast<long long>(lft.dwHighDateTime) << 32) +
-                     static_cast<long long>(lft.dwLowDateTime) - t1);
-    if (tzo >= 0)
-    {
-      tzo = (tzo + 5000000)/10000000;
-    }
-    else
-    {
-      tzo = -((-tzo + 5000000)/10000000);
-    }
-    *offset = tzo*1000000;
-  }
-
   // convert file time to unix time
   return t1/10 - 11644473600000000ll;
 
@@ -139,25 +113,74 @@ long long vtkDICOMUtilities::GetUTC(long long *offset)
 
   struct timeval tv;
   gettimeofday(&tv, 0);
-  long long t = (tv.tv_sec*1000000ll + tv.tv_usec);
+  return (tv.tv_sec*1000000ll + tv.tv_usec);
+
+#endif
+}
+
+//----------------------------------------------------------------------------
+long long vtkDICOMUtilities::GetUTC(long long *offset)
+{
+  long long t = vtkDICOMUtilities::GetUniversalTime();
   if (offset)
   {
-    static long long lastT = 0;
-    if (t - lastT > 1000000ll)
-    {
-      // this is needed on some systems to set timezone info,
-      // because it might do I/O do it at most once per second
-      tzset();
-      lastT = t;
-    }
-    // use localtime to get the offset from utc
-    struct tm tmv;
-    time_t tod = static_cast<time_t>(t/1000000);
-    localtime_r(&tod, &tmv);
-    *offset = tmv.tm_gmtoff*1000000ll;
+    *offset = vtkDICOMUtilities::GetLocalOffset(t);
+  }
+  return t;
+}
+
+//----------------------------------------------------------------------------
+long long vtkDICOMUtilities::GetLocalOffset(long long microsecs)
+{
+#ifdef _WIN32
+
+  // convert unix time to file time
+  long long t1 = microsecs*10 + 11644473600000000ll;
+  ULARGE_INTEGER li;
+  li.QuadPart = t1;
+  FILETIME ft;
+  ft.dwLowDateTime = li.LowPart;
+  ft.dwHighDateTime = li.HighPart;
+
+  // get the current timezone offset by subtracting UTC from local time
+  TIME_ZONE_INFORMATION tzi;
+  GetTimeZoneInformation(&tzi);
+  SYSTEMTIME st;
+  FileTimeToSystemTime(&ft, &st);
+  SYSTEMTIME lst;
+  SystemTimeToTzSpecificLocalTime(&tzi, &st, &lst);
+  FILETIME lft;
+  SystemTimeToFileTime(&lst, &lft);
+  // round to the nearest second, since result has a bit of numerical error
+  li.LowPart = lft.dwLowDateTime;
+  li.HighPart = lft.dwHighDateTime;
+  long long tzo = static_cast<long long>(li.QuadPart) - t1;
+  if (tzo >= 0)
+  {
+    tzo = (tzo + 5000000)/10000000;
+  }
+  else
+  {
+    tzo = -((-tzo + 5000000)/10000000);
+  }
+  return tzo*1000000;
+
+#else
+
+  // tzset() is needed, at least on some systems, to set timezone info
+  // from the TZ environment variable prior to the call to localtime_r()
+  static bool once = false;
+  if (!once)
+  {
+    once = true;
+    tzset();
   }
 
-  return t;
+  // use localtime to get the offset from utc
+  struct tm tmv;
+  time_t tod = static_cast<time_t>(microsecs/1000000);
+  localtime_r(&tod, &tmv);
+  return tmv.tm_gmtoff*1000000ll;
 
 #endif
 }
@@ -165,7 +188,8 @@ long long vtkDICOMUtilities::GetUTC(long long *offset)
 //----------------------------------------------------------------------------
 std::string vtkDICOMUtilities::GenerateDateTime(const char *z)
 {
-  return vtkDICOMUtilities::GenerateDateTime(VTK_LONG_LONG_MIN, z);
+  long long t = vtkDICOMUtilities::GetUniversalTime();
+  return vtkDICOMUtilities::GenerateDateTime(t, z);
 }
 
 //----------------------------------------------------------------------------
@@ -173,39 +197,27 @@ std::string vtkDICOMUtilities::GenerateDateTime(const char *z)
 std::string vtkDICOMUtilities::GenerateDateTime(
   long long t, const char *z)
 {
-  long long zs = 0; // offset for local time in microseconds
+  char tzs[6] = { '+', '0', '0', '0', '0', '\0' };
+  long long zs; // offset for local time in microseconds
 
   // get any timezone info that was supplied by the caller, if a timezone
   // was already generated for the data set we want to use it for generating
   // all time stamps for the data set
-  if (z && strlen(z) == 5 && (z[0] == '+' || z[0] == '-') &&
-      isdigit(z[1]) && isdigit(z[2]) && isdigit(z[3]) && isdigit(z[4]))
+  if (z &&
+      (z[0] == '+' || z[0] == '-') &&
+      (z[1] >= '0' && z[1] <= '9') &&
+      (z[2] >= '0' && z[2] <= '9') &&
+      (z[3] >= '0' && z[3] <= '9') &&
+      (z[4] >= '0' && z[4] <= '9'))
   {
     int zh = (z[1] - '0')*10 + (z[2] - '0');
     int zm = (z[3] - '0')*10 + (z[4] - '0');
     zs = (zh*3600 + zm*60) * (z[0] == '-' ? -1 : +1) * 1000000ll;
   }
-
-  if (z == 0 || z[0] == '\0' || t == VTK_LONG_LONG_MIN)
+  else
   {
-    long long *zsp = 0;
-    if (z == 0 || z[0] == '\0')
-    {
-      zsp = &zs;
-    }
-
-    long long t1 = vtkDICOMUtilities::GetUTC(zsp);
-
-    if (t == VTK_LONG_LONG_MIN)
-    {
-      t = t1;
-    }
-  }
-
-  // generate a new timezone offset string
-  char tzs[6] = { '+', '0', '0', '0', '0', '\0' };
-  if (z == 0 || z[0] == '\0')
-  {
+    // use the local time zone
+    zs = vtkDICOMUtilities::GetLocalOffset(t);
     long long zst = zs/1000000;
     tzs[0] = (zst < 0 ? '-' : '+');
     zst = (zst < 0 ? -zst : zst);
@@ -221,6 +233,11 @@ std::string vtkDICOMUtilities::GenerateDateTime(
   // separate time into days and seconds
   int td = static_cast<int>(t/86400000000ll);
   long long tus = t - td*86400000000ll;
+  if (tus < 0)
+  {
+    td -= 1;
+    tus += 86400000000ll;
+  }
 
   // use algorithm from Henry F. Fliegel and Thomas C. Van Flandern,
   // computes the current date according to Gregorian calendar
@@ -248,7 +265,7 @@ std::string vtkDICOMUtilities::GenerateDateTime(
   S -= M*60;
 
   // create a DICOM datetime string
-  char dt[32];
+  char dt[84];
   sprintf(dt, "%04d%02d%02d%02d%02d%02d.%06d%s",
           y, m, d, H, M, S, us, z);
 
@@ -279,6 +296,7 @@ long long vtkDICOMUtilities::ConvertDateTime(const char *datetime)
       *tp++ = *cp++;
     }
   }
+  long long zs = -1;
   if (*cp == '-' || *cp == '+')
   {
     tp = normalized + 21;
@@ -287,24 +305,13 @@ long long vtkDICOMUtilities::ConvertDateTime(const char *datetime)
     {
       *tp++ = *cp++;
     }
-  }
-  else
-  {
-    // use local time zone
-    long long offset = 0;
-    vtkDICOMUtilities::GetUTC(&offset);
-    long zst = offset/1000000;
-    zst = (zst < 0 ? -zst : zst);
-    long H = (zst/3600)%24;
-    long M = (zst%3600)/60;
-
-    tp = &normalized[21];
-    tp[0] = (offset < 0 ? '-' : '+');
-    tp[1] = H/10 + '0';
-    tp[2] = H%10 + '0';
-    tp[3] = M/10 + '0';
-    tp[4] = M%10 + '0';
-    tp[5] = 0;
+    tp = normalized + 21;
+    zs = ((tp[1] - '0')*600 + (tp[2] - '0')*60 +
+          (tp[3] - '0')*10 + (tp[4] - '0'))*60*1000000ll;
+    if (tp[0] == '-')
+    {
+      zs = -zs;
+    }
   }
 
   // convert normalized datetime to year, month, day etc.
@@ -326,13 +333,6 @@ long long vtkDICOMUtilities::ConvertDateTime(const char *datetime)
   int us = tp[15]*100 + tp[16]*10 + tp[17];
   us = us*1000 + tp[18]*100 + tp[19]*10 + tp[20];
 
-  // get the timezone offset, in seconds
-  int tzs = (tp[22]*600 + tp[23]*60 + tp[24]*10 + tp[25])*60;
-  if (tp[21] == '-')
-  {
-    tzs = -tzs;
-  }
-
   // use algorithm from Henry F. Fliegel and Thomas C. Van Flandern
   // to compute the day according to Gregorian calendar
   long long jd = (1461 * (y + 4800 + (m - 14) / 12)) / 4
@@ -341,11 +341,19 @@ long long vtkDICOMUtilities::ConvertDateTime(const char *datetime)
      + d - 32075;
 
   // compute time (the UNIX epoch began on Julian day 2440588)
-  long long t = (jd - 2440588)*86400 + H*3600 + M*60 + S - tzs;
+  long long t = (jd - 2440588)*86400 + H*3600 + M*60 + S;
 
   t = t*1000000 + us;
 
-  return t;
+  // if no time zone given, find local offset
+  if (zs == -1)
+  {
+    zs = vtkDICOMUtilities::GetLocalOffset(t);
+    // repeat in case we were pushed to opposite side of DST
+    zs = vtkDICOMUtilities::GetLocalOffset(t - zs);
+  }
+
+  return t - zs;
 }
 
 //----------------------------------------------------------------------------
@@ -588,6 +596,61 @@ bool vtkDICOMUtilities::PatternMatches(const char *pattern, const char *val)
 {
   return vtkDICOMUtilities::PatternMatches(
     pattern, strlen(pattern), val, strlen(val));
+}
+
+//----------------------------------------------------------------------------
+bool vtkDICOMUtilities::IsValidUTF8(const char *text, size_t l)
+{
+  const char *cp = text;
+  const char *ep = cp + l;
+
+  while (cp != ep)
+  {
+    if (cp[0] != '\0')
+    {
+      if ((cp[0] & 0x80) == 0)               // U+0001 to U+007F
+      {
+        cp++;
+        continue;
+      }
+
+      // check for trailing bytes in utf-8 sequence
+      if (cp+1 != ep && (cp[1] & 0xC0) == 0x80)
+      {
+        // combine the first two bytes for faster checking
+        unsigned short x = (((unsigned char)(cp[0]) << 8) |
+                             (unsigned char)(cp[1]));
+
+        if (x >= 0xC280 && x < 0xE000)       // U+0080 to U+07FF
+        {
+          cp += 2;
+          continue;
+        }
+        else if (cp+2 != ep && (cp[2] & 0xC0) == 0x80)
+        {
+          if ((x >= 0xE0A0 && x < 0xEDA0) || // U+0800 to U+D7FF
+              (x >= 0xEE80 && x < 0xF000))   // U+E000 to U+FFFF
+          {
+            cp += 3;
+            continue;
+          }
+          else if (cp+3 != ep && (cp[3] & 0xC0) == 0x80)
+          {
+            if (x >= 0xF090 && x < 0xF490)   // U+10000 to U+10FFFF
+            {
+              cp += 4;
+              continue;
+            }
+          }
+        }
+      }
+    }
+
+    // utf-8 decoding error occurred at position "cp"
+    return false;
+  }
+
+  return true;
 }
 
 //----------------------------------------------------------------------------

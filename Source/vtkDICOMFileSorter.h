@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -14,8 +14,9 @@
 #ifndef vtkDICOMFileSorter_h
 #define vtkDICOMFileSorter_h
 
-#include <vtkObject.h>
+#include "vtkObject.h"
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
 
 class vtkStringArray;
 class vtkIntArray;
@@ -33,11 +34,7 @@ class VTKDICOM_EXPORT vtkDICOMFileSorter : public vtkObject
 {
 public:
   vtkTypeMacro(vtkDICOMFileSorter,vtkObject);
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
   static vtkDICOMFileSorter *New();
 
   //@{
@@ -55,7 +52,7 @@ public:
   //! Set a list of file names to group and sort.
   /*!
    *  This method is mutually exclusive with SetInputFileName().
-   *  If you call ths method, then InputFileName will be set to NULL
+   *  If you call this method, then InputFileName will be set to NULL
    *  and vice versa.
    */
   void SetInputFileNames(vtkStringArray *input);
@@ -151,12 +148,12 @@ protected:
   void SetErrorCode(unsigned long e) { this->ErrorCode = e; }
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMFileSorter(const vtkDICOMFileSorter&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMFileSorter&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMFileSorter(const vtkDICOMFileSorter&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMFileSorter&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMFileSorter(const vtkDICOMFileSorter&);
-  void operator=(const vtkDICOMFileSorter&);
+  vtkDICOMFileSorter(const vtkDICOMFileSorter&) = delete;
+  void operator=(const vtkDICOMFileSorter&) = delete;
 #endif
 
   class StringArrayVector;

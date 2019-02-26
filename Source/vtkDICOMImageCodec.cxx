@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -45,18 +45,14 @@ const char *vtkDICOMImageCodec::UIDs[21] = {
 //----------------------------------------------------------------------------
 vtkDICOMImageCodec::ImageFormat::ImageFormat(vtkDICOMMetaData *meta)
 {
-  this->Rows = meta->GetAttributeValue(DC::Rows).AsInt();
-  this->Columns = meta->GetAttributeValue(DC::Columns).AsInt();
-  this->BitsAllocated = meta->GetAttributeValue(DC::BitsAllocated).AsInt();
-  this->BitsStored = meta->GetAttributeValue(DC::BitsStored).AsInt();
-  this->PixelRepresentation =
-    meta->GetAttributeValue(DC::PixelRepresentation).AsInt();
-  this->SamplesPerPixel =
-    meta->GetAttributeValue(DC::SamplesPerPixel).AsInt();
-  this->PlanarConfiguration =
-    meta->GetAttributeValue(DC::PlanarConfiguration).AsInt();
-  const char *lossy =
-    meta->GetAttributeValue(DC::AllowLossyCompression).GetCharData();
+  this->Rows = meta->Get(DC::Rows).AsInt();
+  this->Columns = meta->Get(DC::Columns).AsInt();
+  this->BitsAllocated = meta->Get(DC::BitsAllocated).AsInt();
+  this->BitsStored = meta->Get(DC::BitsStored).AsInt();
+  this->PixelRepresentation = meta->Get(DC::PixelRepresentation).AsInt();
+  this->SamplesPerPixel = meta->Get(DC::SamplesPerPixel).AsInt();
+  this->PlanarConfiguration = meta->Get(DC::PlanarConfiguration).AsInt();
+  const char *lossy = meta->Get(DC::AllowLossyCompression).GetCharData();
   this->AllowLossyCompression = (lossy && strncmp(lossy, "YES", 3) == 0);
 }
 

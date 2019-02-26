@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2015-2016 David Gobbi
+  Copyright (c) 2015 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -11,30 +11,32 @@
      PURPOSE.  See the above copyright notice for more information.
 
 =========================================================================*/
-/*! \class vtkScancoCTReader
- *  \brief Read SCANCO ISQ and AIM medical image files
+/**
+ * \class vtkScancoCTReader
+ * \brief Read SCANCO ISQ and AIM medical image files
  *
- *  This class reads ISQ and AIM files, which are used for high-resolution
- *  computed tomography.  The information that it provides uses different
- *  units as compared to the original files: all distances are given in
- *  millimeters (instead of micrometers), times are given in milliseconds
- *  (instead of microseconds), voltage and current given in kV and mA
- *  (instead of volts and microamps).  If the scanner was calibrated, then
- *  the data values can be converted to calibrated units.  To convert
- *  to linear attenuation coefficients [cm^-1], simply divide the data
- *  values by the MuScaling.  To convert to density values, multiply
- *  the data values by the RescaleSlope and add the RescaleIntercept.
- *  To convert to Hounsfield units, multiply by 1000/(MuScaling*MuWater)
- *  and subtract 1000.
+ * This class reads ISQ and AIM files, which are used for high-resolution
+ * computed tomography.  The information that it provides uses different
+ * units as compared to the original files: all distances are given in
+ * millimeters (instead of micrometers), times are given in milliseconds
+ * (instead of microseconds), voltage and current given in kV and mA
+ * (instead of volts and microamps).  If the scanner was calibrated, then
+ * the data values can be converted to calibrated units.  To convert
+ * to linear attenuation coefficients [cm^-1], simply divide the data
+ * values by the MuScaling.  To convert to density values, multiply
+ * the data values by the RescaleSlope and add the RescaleIntercept.
+ * To convert to Hounsfield units, multiply by 1000/(MuScaling*MuWater)
+ * and subtract 1000.
  *
- *  Created at the Calgary Image Processing and Analysis Centre (CIPAC).
+ * Created at the Calgary Image Processing and Analysis Centre (CIPAC).
  */
 
 #ifndef vtkScancoCTReader_h
 #define vtkScancoCTReader_h
 
-#include <vtkImageReader2.h>
+#include "vtkImageReader2.h"
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
 
 //----------------------------------------------------------------------------
 class VTKDICOM_EXPORT vtkScancoCTReader : public vtkImageReader2
@@ -44,43 +46,23 @@ public:
   static vtkScancoCTReader *New();
   vtkTypeMacro(vtkScancoCTReader, vtkImageReader2);
 
-#ifdef VTK_OVERRIDE
   //! Print information about this object.
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
 
   //@{
   //! Valid extensions for this file type.
-  const char* GetFileExtensions() VTK_OVERRIDE {
+  const char* GetFileExtensions() VTK_DICOM_OVERRIDE {
     return ".isq .rsq .rad .aim" ; }
 
   //! Return a descriptive name that might be useful in a GUI.
-  const char* GetDescriptiveName() VTK_OVERRIDE {
+  const char* GetDescriptiveName() VTK_DICOM_OVERRIDE {
     return "SCANCO MicroCT"; }
   //@}
 
   //@{
   //! Return true if this reader can read the given file.
-  int CanReadFile(const char* filename) VTK_OVERRIDE;
+  int CanReadFile(const char* filename) VTK_DICOM_OVERRIDE;
   //@}
-#else
-  //! Print information about this object.
-  void PrintSelf(ostream& os, vtkIndent indent);
-
-  //@{
-  //! Valid extensions for this file type.
-  const char* GetFileExtensions() {
-    return ".isq .rsq .rad .aim" ; }
-
-  //! Return a descriptive name that might be useful in a GUI.
-  const char* GetDescriptiveName() {
-    return "SCANCO MicroCT"; }
-  //@}
-
-  //@{
-  //! Return true if this reader can read the given file.
-  int CanReadFile(const char* filename);
-  //@}
-#endif
 
   //@{
   //! Get a string that states the version of the file header.
@@ -122,7 +104,7 @@ public:
   //! Get the number of samples.
   int GetNumberOfSamples() { return this->NumberOfSamples; }
 
-  //! Get the nubmer of projections.
+  //! Get the number of projections.
   int GetNumberOfProjections() { return this->NumberOfProjections; }
 
   //! Get the scan distance (in millimeters).
@@ -189,27 +171,15 @@ protected:
   vtkScancoCTReader();
   ~vtkScancoCTReader();
 
-#ifdef VTK_OVERRIDE
   //! Read the header information.
   int RequestInformation(
     vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector) VTK_OVERRIDE;
+    vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
 
   //! Read the voxel data.
   int RequestData(
     vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector) VTK_OVERRIDE;
-#else
-  //! Read the header information.
-  int RequestInformation(
-    vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector);
-
-  //! Read the voxel data.
-  int RequestData(
-    vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector);
-#endif
+    vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
 
   //! Initialize the header information
   void InitializeHeader();
@@ -237,6 +207,12 @@ protected:
 
   //! Convert char data to float (single precision).
   static float DecodeFloat(const void *data);
+
+  //! Convert a string to a double precision value.
+  static double StringToDouble(const char *cp, char **cpp=0);
+
+  //! Convert a string to an int.
+  static int StringToInt(const char *cp, char **cpp=0);
 
   //! Convert char data to float (double precision).
   static double DecodeDouble(const void *data);
@@ -286,12 +262,12 @@ protected:
   int Compression;
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkScancoCTReader(const vtkScancoCTReader&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkScancoCTReader&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkScancoCTReader(const vtkScancoCTReader&) VTK_DICOM_DELETE;
+  void operator=(const vtkScancoCTReader&) VTK_DICOM_DELETE;
 #else
-  vtkScancoCTReader(const vtkScancoCTReader&);
-  void operator=(const vtkScancoCTReader&);
+  vtkScancoCTReader(const vtkScancoCTReader&) = delete;
+  void operator=(const vtkScancoCTReader&) = delete;
 #endif
 };
 

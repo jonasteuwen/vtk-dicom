@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -66,25 +66,24 @@ void vtkDICOMSequence::SetItem(size_t i, const vtkDICOMItem& item)
 }
 
 //----------------------------------------------------------------------------
-const vtkDICOMValue &vtkDICOMSequence::GetAttributeValue(
-    size_t i, vtkDICOMTag tag) const
+const vtkDICOMValue &vtkDICOMSequence::Get(size_t i, vtkDICOMTag tag) const
 {
   const vtkDICOMItem *ptr = this->V.GetSequenceData();
   if (ptr != 0 && i < this->V.GetNumberOfValues())
   {
-    return ptr[i].GetAttributeValue(tag);
+    return ptr[i].Get(tag);
   }
   return vtkDICOMSequence::InvalidValue;
 }
 
 //----------------------------------------------------------------------------
-const vtkDICOMValue &vtkDICOMSequence::GetAttributeValue(
+const vtkDICOMValue &vtkDICOMSequence::Get(
     size_t i, const vtkDICOMTagPath &tagpath) const
 {
   const vtkDICOMItem *ptr = this->V.GetSequenceData();
   if (ptr != 0 && i < this->V.GetNumberOfValues())
   {
-    return ptr[i].GetAttributeValue(tagpath);
+    return ptr[i].Get(tagpath);
   }
   return vtkDICOMSequence::InvalidValue;
 }

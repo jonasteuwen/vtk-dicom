@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2016 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -28,19 +28,19 @@
 #include "vtkNIFTIHeader.h"
 #include "vtkNIFTIReader.h"
 
-#include <vtkVersion.h>
-#include <vtkImageData.h>
-#include <vtkMatrix4x4.h>
-#include <vtkImageReslice.h>
-#include <vtkImageShiftScale.h>
-#include <vtkStringArray.h>
-#include <vtkIntArray.h>
-#include <vtkErrorCode.h>
-#include <vtkSortFileNames.h>
-#include <vtkSmartPointer.h>
+#include "vtkVersion.h"
+#include "vtkImageData.h"
+#include "vtkMatrix4x4.h"
+#include "vtkImageReslice.h"
+#include "vtkImageShiftScale.h"
+#include "vtkStringArray.h"
+#include "vtkIntArray.h"
+#include "vtkErrorCode.h"
+#include "vtkSortFileNames.h"
+#include "vtkSmartPointer.h"
 
 #if (VTK_MAJOR_VERSION > 5) || (VTK_MINOR_VERSION > 9)
-#include <vtkImageHistogramStatistics.h>
+#include "vtkImageHistogramStatistics.h"
 #endif
 
 #include <string>
@@ -90,7 +90,7 @@ void niftitodicom_version(FILE *file, const char *command_name, bool verbose)
   {
     fprintf(file, "%s %s\n", cp, DICOM_VERSION);
     fprintf(file, "\n"
-      "Copyright (c) 2012-2016, David Gobbi.\n\n"
+      "Copyright (c) 2012-2019, David Gobbi.\n\n"
       "This software is distributed under an open-source license.  See the\n"
       "Copyright.txt file that comes with the vtk-dicom source distribution.\n");
   }
@@ -471,11 +471,11 @@ void niftitodicom_convert_one(
   // set the metadata supplied on the command line
   if (options->series_description)
   {
-    meta->SetAttributeValue(DC::SeriesDescription, options->series_description);
+    meta->Set(DC::SeriesDescription, options->series_description);
   }
   if (options->series_number)
   {
-    meta->SetAttributeValue(DC::SeriesNumber, options->series_number);
+    meta->Set(DC::SeriesNumber, options->series_number);
   }
 
   // read the NIFTI file
@@ -507,7 +507,7 @@ void niftitodicom_convert_one(
     xformCode = hdr->GetSFormCode();
   }
 
-  // convert to NIFTI coordinate system
+  // convert from NIFTI coordinate system to DICOM coordinate system
   vtkSmartPointer<vtkDICOMToRAS> converter =
     vtkSmartPointer<vtkDICOMToRAS>::New();
   converter->SetInputConnection(reader->GetOutputPort());
@@ -735,15 +735,15 @@ void niftitodicom_convert_one(
   // mix in the NIFTI header information
   if (xformCode == vtkNIFTIHeader::XFormTalairach)
   {
-    meta->SetAttributeValue(DC::FrameOfReferenceUID, "1.2.840.10008.1.4.1.1");
+    meta->Set(DC::FrameOfReferenceUID, "1.2.840.10008.1.4.1.1");
   }
   else if (xformCode == vtkNIFTIHeader::XFormMNI152)
   {
-    meta->SetAttributeValue(DC::FrameOfReferenceUID, "1.2.840.10008.1.4.1.15");
+    meta->Set(DC::FrameOfReferenceUID, "1.2.840.10008.1.4.1.15");
   }
   else if (xformCode != vtkNIFTIHeader::XFormScannerAnat)
   {
-    meta->RemoveAttribute(DC::FrameOfReferenceUID);
+    meta->Erase(DC::FrameOfReferenceUID);
   }
 
   // make the generator

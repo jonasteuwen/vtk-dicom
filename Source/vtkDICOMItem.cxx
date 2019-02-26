@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -30,14 +30,13 @@ vtkDICOMItem::vtkDICOMItem(vtkDICOMMetaData *meta)
   this->L->Tail.Prev = &this->L->Head;
   if (meta)
   {
-    const vtkDICOMValue& vcs =
-      meta->GetAttributeValue(DC::SpecificCharacterSet);
+    const vtkDICOMValue& vcs = meta->Get(DC::SpecificCharacterSet);
     if (vcs.IsValid())
     {
       this->L->CharacterSet =
         vtkDICOMCharacterSet(vcs.GetCharData(), vcs.GetVL());
     }
-    const vtkDICOMValue &v = meta->GetAttributeValue(DC::PixelRepresentation);
+    const vtkDICOMValue &v = meta->Get(DC::PixelRepresentation);
     if (v.IsValid())
     {
       this->L->VRForXS = (v.AsUnsignedShort() == 0 ?
@@ -111,8 +110,14 @@ void vtkDICOMItem::FreeList()
 //----------------------------------------------------------------------------
 void vtkDICOMItem::CopyList(const List *o, List *t)
 {
+  t->NumberOfDataElements = o->NumberOfDataElements;
+  t->DataElements = 0;
   t->ByteOffset = o->ByteOffset;
   t->Delimited = o->Delimited;
+  t->CharacterSet = o->CharacterSet;
+  t->VRForXS = o->VRForXS;
+  t->Head.Next = &t->Tail;
+  t->Tail.Prev = &t->Head;
 
   int n = o->NumberOfDataElements;
   if (n > 0)
@@ -245,13 +250,12 @@ vtkDICOMItem *vtkDICOMItem::FindItemOrInsert(
       if (n > m)
       {
         const vtkDICOMValue& vcs =
-          this->GetAttributeValue(DC::SpecificCharacterSet);
+          this->Get(DC::SpecificCharacterSet);
         if (vcs.IsValid())
         {
           cs = vtkDICOMCharacterSet(vcs.GetCharData(), vcs.GetVL());
         }
-        const vtkDICOMValue &v = this->GetAttributeValue(
-          DC::PixelRepresentation);
+        const vtkDICOMValue &v = this->Get(DC::PixelRepresentation);
         if (v.IsValid())
         {
           vrForXS = (v.AsUnsignedShort() == 0 ?
@@ -286,8 +290,7 @@ vtkDICOMItem *vtkDICOMItem::FindItemOrInsert(
 }
 
 //----------------------------------------------------------------------------
-void vtkDICOMItem::SetAttributeValue(
-  vtkDICOMTag tag, const vtkDICOMValue& v)
+void vtkDICOMItem::Set(vtkDICOMTag tag, const vtkDICOMValue& v)
 {
   vtkDICOMDataElement *tptr = this->FindDataElementOrInsert(tag);
 
@@ -305,21 +308,19 @@ void vtkDICOMItem::SetAttributeValue(
 }
 
 //----------------------------------------------------------------------------
-void vtkDICOMItem::SetAttributeValue(
-  const vtkDICOMTagPath& tagpath, const vtkDICOMValue& v)
+void vtkDICOMItem::Set(const vtkDICOMTagPath& tagpath, const vtkDICOMValue& v)
 {
   vtkDICOMTag tag;
   vtkDICOMItem *item = this->FindItemOrInsert(tagpath, &tag);
   // if item is NULL, the path was invalid
   if (item)
   {
-    item->SetAttributeValue(tag, v);
+    item->Set(tag, v);
   }
 }
 
 //----------------------------------------------------------------------------
-void vtkDICOMItem::SetAttributeValue(
-  const vtkDICOMTagPath& tagpath, double v)
+void vtkDICOMItem::Set(const vtkDICOMTagPath& tagpath, double v)
 {
   vtkDICOMTag tag;
   vtkDICOMItem *item = this->FindItemOrInsert(tagpath, &tag);
@@ -330,13 +331,12 @@ void vtkDICOMItem::SetAttributeValue(
     assert(vr != vtkDICOMVR::UN);
     if (vr != vtkDICOMVR::UN)
     {
-      item->SetAttributeValue(tag, vtkDICOMValue(vr, v));
+      item->Set(tag, vtkDICOMValue(vr, v));
     }
   }
 }
 
-void vtkDICOMItem::SetAttributeValue(
-  const vtkDICOMTagPath& tagpath, const std::string& v)
+void vtkDICOMItem::Set(const vtkDICOMTagPath& tagpath, const std::string& v)
 {
   vtkDICOMTag tag;
   vtkDICOMItem *item = this->FindItemOrInsert(tagpath, &tag);
@@ -349,35 +349,33 @@ void vtkDICOMItem::SetAttributeValue(
     if (vr.HasSpecificCharacterSet() && item->L != 0)
     {
       vtkDICOMCharacterSet cs = item->L->CharacterSet;
-      const vtkDICOMValue& vcs =
-        item->GetAttributeValue(DC::SpecificCharacterSet);
+      const vtkDICOMValue& vcs = item->Get(DC::SpecificCharacterSet);
       if (vcs.IsValid())
       {
         cs = vtkDICOMCharacterSet(vcs.GetCharData(), vcs.GetVL());
       }
-      item->SetAttributeValue(tag, vtkDICOMValue(vr, cs, v));
+      item->Set(tag, vtkDICOMValue(vr, cs, v));
     }
     else if (vr != vtkDICOMVR::UN)
     {
-      item->SetAttributeValue(tag, vtkDICOMValue(vr, v));
+      item->Set(tag, vtkDICOMValue(vr, v));
     }
   }
 }
 
 //----------------------------------------------------------------------------
-void vtkDICOMItem::SetAttributeValue(vtkDICOMTag tag, double v)
+void vtkDICOMItem::Set(vtkDICOMTag tag, double v)
 {
-  this->SetAttributeValue(vtkDICOMTagPath(tag), v);
+  this->Set(vtkDICOMTagPath(tag), v);
 }
 
-void vtkDICOMItem::SetAttributeValue(vtkDICOMTag tag, const std::string& v)
+void vtkDICOMItem::Set(vtkDICOMTag tag, const std::string& v)
 {
-  this->SetAttributeValue(vtkDICOMTagPath(tag), v);
+  this->Set(vtkDICOMTagPath(tag), v);
 }
 
 //----------------------------------------------------------------------------
-const vtkDICOMValue &vtkDICOMItem::GetAttributeValue(
-  vtkDICOMTag tag) const
+const vtkDICOMValue &vtkDICOMItem::Get(vtkDICOMTag tag) const
 {
   if (this->L)
   {
@@ -396,10 +394,9 @@ const vtkDICOMValue &vtkDICOMItem::GetAttributeValue(
 }
 
 //----------------------------------------------------------------------------
-const vtkDICOMValue &vtkDICOMItem::GetAttributeValue(
-  const vtkDICOMTagPath &tagpath) const
+const vtkDICOMValue &vtkDICOMItem::Get(const vtkDICOMTagPath &tagpath) const
 {
-  const vtkDICOMValue &v = this->GetAttributeValue(tagpath.GetHead());
+  const vtkDICOMValue &v = this->Get(tagpath.GetHead());
   if (!tagpath.HasTail())
   {
     return v;
@@ -411,7 +408,7 @@ const vtkDICOMValue &vtkDICOMItem::GetAttributeValue(
     const vtkDICOMItem *items = v.GetSequenceData();
     if (items != 0 && i < n)
     {
-      return items[i].GetAttributeValue(tagpath.GetTail());
+      return items[i].Get(tagpath.GetTail());
     }
   }
   return vtkDICOMItem::InvalidValue;
@@ -429,8 +426,7 @@ vtkDICOMVR vtkDICOMItem::FindDictVR(vtkDICOMTag tag) const
     // use the dictionary VR
     if (vr == vtkDICOMVR::XS)
     {
-      const vtkDICOMValue &v =
-        this->GetAttributeValue(DC::PixelRepresentation);
+      const vtkDICOMValue &v = this->Get(DC::PixelRepresentation);
       if (v.IsValid())
       {
         unsigned short r = v.AsUnsignedShort();
@@ -451,7 +447,7 @@ vtkDICOMVR vtkDICOMItem::FindDictVR(vtkDICOMTag tag) const
       vtkDICOMTag reftag = (tag.GetGroup() == 0x5400 ?
                             DC::WaveformBitsAllocated :
                             DC::BitsAllocated);
-      const vtkDICOMValue& v = this->GetAttributeValue(reftag);
+      const vtkDICOMValue& v = this->Get(reftag);
       if (v.IsValid() && v.AsUnsignedShort() <= 8)
       {
         vr = vtkDICOMVR::OB;
@@ -517,8 +513,7 @@ vtkDICOMTag vtkDICOMItem::ResolvePrivateTagForWriting(
       {
         // creator elements are LO, which uses SpecificCharacterSet
         vtkDICOMCharacterSet cs = this->L->CharacterSet;
-        const vtkDICOMValue& vcs =
-          this->GetAttributeValue(DC::SpecificCharacterSet);
+        const vtkDICOMValue& vcs = this->Get(DC::SpecificCharacterSet);
         if (vcs.IsValid())
         {
           cs = vtkDICOMCharacterSet(vcs.GetCharData(), vcs.GetVL());
@@ -549,7 +544,7 @@ vtkDICOMDictEntry vtkDICOMItem::FindDictEntry(vtkDICOMTag tag) const
     element &= 0x00ffu;
     tag = vtkDICOMTag(group, element);
     vtkDICOMTag creatorTag(group, creatorElement);
-    dict = this->GetAttributeValue(creatorTag).GetCharData();
+    dict = this->Get(creatorTag).GetCharData();
   }
 
   return vtkDICOMDictionary::FindDictEntry(tag, dict);

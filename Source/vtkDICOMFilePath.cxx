@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -200,7 +200,7 @@ std::string vtkDICOMFilePath::Join(const std::string& second) const
           {
             endpos++;
           }
-          // Remove the preceeding part of the path
+          // Remove the preceding part of the path
           l = path.length();
           size_t m = RootLength(path);
           if (l > m && path[l-1] == sep)
@@ -658,7 +658,7 @@ size_t vtkDICOMFilePath::RootLength(const std::string& path)
   // does not allows substitutions such as "/" for "\" or "." and "..".
   //  \\?\A:\ (the root of a device)
   //  \\?\UNC\server\share\ (a UNC path prefix)
-  // Finally, the special "\\?\" prefix is used to name system devices:
+  // Finally, the special "\\.\" prefix is used to name system devices:
   //  \\.\DEVICE (name of a special devices)
   if (l >= 4 && HasExtendedPrefix(path))
   {

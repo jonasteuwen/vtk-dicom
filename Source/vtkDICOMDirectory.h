@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -14,13 +14,17 @@
 #ifndef vtkDICOMDirectory_h
 #define vtkDICOMDirectory_h
 
-#include <vtkAlgorithm.h>
+#include "vtkAlgorithm.h"
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
+#include "vtkDICOMCharacterSet.h" // For character sets
+#include "vtkVersion.h" // For changes to pipeline API
 
 class vtkStringArray;
 class vtkIntArray;
 class vtkDICOMMetaData;
 class vtkDICOMItem;
+class vtkDICOMTag;
 
 //! Get information about all DICOM files within a directory.
 /*!
@@ -33,11 +37,7 @@ class VTKDICOM_EXPORT vtkDICOMDirectory : public vtkAlgorithm
 {
 public:
   vtkTypeMacro(vtkDICOMDirectory,vtkAlgorithm);
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
   static vtkDICOMDirectory *New();
 
   //! Levels within the DICOM information model.
@@ -122,24 +122,13 @@ public:
    * This method causes the directory to be read.  It must be called before
    * any of the Get methods.
    */
-#ifdef VTK_OVERRIDE
-  void Update() VTK_OVERRIDE { this->Update(0); }
-  void Update(int) VTK_OVERRIDE;
+  void Update() VTK_DICOM_OVERRIDE { this->Update(0); }
+  void Update(int) VTK_DICOM_OVERRIDE;
 #if (VTK_MAJOR_VERSION == 7 && VTK_MINOR_VERSION > 0) || VTK_MAJOR_VERSION > 7
-  int Update(vtkInformation *) VTK_OVERRIDE {
+  int Update(vtkInformation *) VTK_DICOM_OVERRIDE {
     this->Update(); return 1; }
-  int Update(int i, vtkInformationVector *) VTK_OVERRIDE {
+  int Update(int i, vtkInformationVector *) VTK_DICOM_OVERRIDE {
     this->Update(i); return 1; }
-#endif
-#else
-  void Update() { this->Update(0); }
-  void Update(int);
-#if (VTK_MAJOR_VERSION == 7 && VTK_MINOR_VERSION > 0) || VTK_MAJOR_VERSION > 7
-  int Update(vtkInformation *) {
-    this->Update(); return 1; }
-  int Update(int i, vtkInformationVector *) {
-    this->Update(i); return 1; }
-#endif
 #endif
   //@}
 
@@ -194,6 +183,24 @@ public:
   vtkDICOMMetaData *GetMetaDataForSeries(int i);
   //@}
 
+  //! Set when to query the files, rather than just the DICOMDIR index.
+  /*!
+   *  If a DICOMDIR file is present, the default behavior is to only
+   *  query the other files in the directory if the Query contains
+   *  elements that cannot be elucidated from the DICOMDIR file.
+   *  For Always, the data returned by GetMetaDataForSeries() will
+   *  always be data from the file, not the DICOMDIR (though the
+   *  data returned by GetSeriesRecord() etc. will be from DICOMDIR).
+   *  For Never, the files will never be scanned if a DICOMDIR is
+   *  present, which means that any Query that is applied can only
+   *  check attributes that are present in the DICOMDIR.
+   */
+  void SetQueryFilesToAlways() { this->SetQueryFiles(1); }
+  void SetQueryFilesToNever() { this->SetQueryFiles(0); }
+  void SetQueryFilesToDefault() { this->SetQueryFiles(-1); }
+  vtkSetMacro(QueryFiles, int);
+  int GetQueryFiles() { return this->QueryFiles; }
+
   //@{
   //! Get the file set ID.  This will be NULL unless a DICOMDIR was found.
   const char *GetFileSetID() { return this->FileSetID; }
@@ -202,6 +209,17 @@ public:
   //@{
   //! Get the filename associated with the error code.
   const char *GetInternalFileName() { return this->InternalFileName; }
+  //@}
+
+  //@{
+  //! If On, the DICOMDIR file will be ignored.
+  /*!
+   *  This method can be used to ignore the DICOMDIR file if it is present,
+   *  instead of using the DICOMDIR file as an index.
+   */
+  vtkSetMacro(IgnoreDicomdir, int);
+  vtkBooleanMacro(IgnoreDicomdir, int);
+  int GetIgnoreDicomdir() { return this->IgnoreDicomdir; }
   //@}
 
   //@{
@@ -233,6 +251,31 @@ public:
   int GetShowHidden() { return this->ShowHidden; }
   //@}
 
+  //@{
+  //! Set the character set to use if SpecificCharacterSet is missing.
+  /*!
+   *  Some DICOM files do not list a SpecificCharacterSet attribute, but
+   *  nevertheless use a non-ASCII character encoding.  This method can be
+   *  used to specify the character set in absence of SpecificCharacterSet.
+   *  If SpecificCharacterSet is present, the default will not override it
+   *  unless OverrideCharacterSet is true.
+   */
+  void SetDefaultCharacterSet(vtkDICOMCharacterSet cs);
+  vtkDICOMCharacterSet GetDefaultCharacterSet() {
+    return this->DefaultCharacterSet; }
+
+  //! Override the value stored in SpecificCharacterSet.
+  /*!
+   *  This method can be used if the SpecificCharacterSet attribute of a
+   *  file is incorrect.  It overrides the SpecificCharacterSet with the
+   *  DefaultCharacterSet.
+   */
+  vtkSetMacro(OverrideCharacterSet, bool);
+  vtkBooleanMacro(OverrideCharacterSet, bool);
+  bool GetOverrideCharacterSet() {
+    return this->OverrideCharacterSet; }
+  //@}
+
 protected:
   vtkDICOMDirectory();
   ~vtkDICOMDirectory();
@@ -240,10 +283,14 @@ protected:
   const char *DirectoryName;
   vtkStringArray *InputFileNames;
   const char *FilePattern;
+  int QueryFiles;
+  int IgnoreDicomdir;
   int RequirePixelData;
   int FollowSymlinks;
   int ShowHidden;
   int ScanDepth;
+  vtkDICOMCharacterSet DefaultCharacterSet;
+  bool OverrideCharacterSet;
 
   vtkTimeStamp UpdateTime;
   char *InternalFileName;
@@ -252,7 +299,8 @@ protected:
   virtual void Execute();
 
   //! Fill image info from image metadata.
-  virtual void FillImageRecord(vtkDICOMItem *item, vtkDICOMMetaData *meta);
+  virtual void FillImageRecord(vtkDICOMItem *item, vtkDICOMMetaData *meta,
+                               const vtkDICOMTag *skip, size_t nskip);
 
   //! Fill series info from image metadata.
   virtual void FillSeriesRecord(vtkDICOMItem *item, vtkDICOMMetaData *meta);
@@ -315,11 +363,8 @@ protected:
   void SetInternalFileName(const char *fname);
 
   //! Set the error code.
-#ifdef VTK_OVERRIDE
-  void SetErrorCode(unsigned long e) VTK_OVERRIDE { this->ErrorCode = e; }
-#else
-  void SetErrorCode(unsigned long e) { this->ErrorCode = e; }
-#endif
+  void SetErrorCode(unsigned long e) VTK_DICOM_OVERRIDE {
+    this->ErrorCode = e; }
 
   //! Add all of the series listed in a DICOMDIR file.
   /*!
@@ -341,12 +386,12 @@ protected:
     vtkDICOMMetaData *meta, const vtkDICOMItem *item, int instance);
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMDirectory(const vtkDICOMDirectory&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMDirectory&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMDirectory(const vtkDICOMDirectory&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMDirectory&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMDirectory(const vtkDICOMDirectory&);
-  void operator=(const vtkDICOMDirectory&);
+  vtkDICOMDirectory(const vtkDICOMDirectory&) = delete;
+  void operator=(const vtkDICOMDirectory&) = delete;
 #endif
 
   struct SeriesItem;
@@ -368,6 +413,11 @@ private:
   VisitedVector *Visited;
   char *FileSetID;
   bool UsingOsirixDatabase;
+
+  const vtkDICOMItem *CurrentPatientRecord;
+  const vtkDICOMItem *CurrentStudyRecord;
+  const vtkDICOMItem *CurrentSeriesRecord;
+  const vtkDICOMItem *CurrentImageRecord;
 
   //! Compare FileInfo entries by instance number
   static bool CompareInstance(const FileInfo &fi1, const FileInfo &fi2);

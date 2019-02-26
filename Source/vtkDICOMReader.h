@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2016 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -11,18 +11,21 @@
      PURPOSE.  See the above copyright notice for more information.
 
 =========================================================================*/
-/*! \class vtkDICOMReader
- *  \brief Read DICOM image files.
+/**
+ * \class vtkDICOMReader
+ * \brief Read DICOM image files.
  *
- *  This class reads a series of DICOM files into a vtkImageData object,
- *  and also provides access to the DICOM meta data for each file.
+ * This class reads a series of DICOM files into a vtkImageData object,
+ * and also provides access to the DICOM meta data for each file.
  */
 
 #ifndef vtkDICOMReader_h
 #define vtkDICOMReader_h
 
-#include <vtkImageReader2.h>
+#include "vtkImageReader2.h"
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
+#include "vtkDICOMCharacterSet.h" // For character sets
 
 class vtkIntArray;
 class vtkTypeInt64Array;
@@ -43,39 +46,20 @@ public:
   static vtkDICOMReader *New();
 
   //! Print information about this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
 
-#ifdef VTK_OVERRIDE
   //@{
   //! Valid extensions for this file type.
-  const char* GetFileExtensions() VTK_OVERRIDE {
+  const char* GetFileExtensions() VTK_DICOM_OVERRIDE {
     return ".dcm .dc"; }
 
   //! Return a descriptive name that might be useful in a GUI.
-  const char* GetDescriptiveName() VTK_OVERRIDE {
+  const char* GetDescriptiveName() VTK_DICOM_OVERRIDE {
     return "DICOM"; }
 
   //! Return true if this reader can read the given file.
-  int CanReadFile(const char* filename) VTK_OVERRIDE;
+  int CanReadFile(const char* filename) VTK_DICOM_OVERRIDE;
   //@}
-#else
-  //@{
-  //! Valid extensions for this file type.
-  const char* GetFileExtensions() {
-    return ".dcm .dc"; }
-
-  //! Return a descriptive name that might be useful in a GUI.
-  const char* GetDescriptiveName() {
-    return "DICOM"; }
-
-  //! Return true if this reader can read the given file.
-  int CanReadFile(const char* filename);
-  //@}
-#endif
 
   //@{
   //! Set the Stack ID of the stack to load, for named stacks.
@@ -123,13 +107,39 @@ public:
   //@{
   //! Get the meta data for the DICOM files.
   /*!
-   *  The GetAttributeValue() method of vtkDICOMMataData takes optional
-   *  file and frame indices, which specify the file and the frame within
-   *  that file to get the attribute from.  If you have a slice index rather
-   *  than a file index and frame index, then use the FileIndexArray and
+   *  The Get() method of vtkDICOMMataData takes optional file and frame
+   *  indices, which specify the file and the frame within that file to
+   *  get the attribute from.  If you have a slice index rather than a
+   *  file index and frame index, then use the FileIndexArray and
    *  FrameIndexArray to convert the slice index into file and frame indices.
    */
   vtkDICOMMetaData *GetMetaData() { return this->MetaData; }
+  //@}
+
+  //@{
+  //! Set the character set to use if SpecificCharacterSet is missing.
+  /*!
+   *  Some DICOM files do not list a SpecificCharacterSet attribute, but
+   *  nevertheless use a non-ASCII character encoding.  This method can be
+   *  used to specify the character set in absence of SpecificCharacterSet.
+   *  This method will not take effect unless is is called before the image
+   *  is read.  If SpecificCharacterSet is present, the default will not
+   *  override it unless OverrideCharacterSet is true.
+   */
+  void SetDefaultCharacterSet(vtkDICOMCharacterSet cs);
+  vtkDICOMCharacterSet GetDefaultCharacterSet() {
+    return this->DefaultCharacterSet; }
+
+  //! Override the value stored in SpecificCharacterSet.
+  /*!
+   *  This method can be used if the SpecificCharacterSet attribute of a
+   *  file is incorrect.  It overrides the SpecificCharacterSet with the
+   *  DefaultCharacterSet.
+   */
+  vtkSetMacro(OverrideCharacterSet, bool);
+  vtkBooleanMacro(OverrideCharacterSet, bool);
+  bool GetOverrideCharacterSet() {
+    return this->OverrideCharacterSet; }
   //@}
 
   //@{
@@ -187,15 +197,16 @@ public:
   //@}
 
   //@{
-  //! Turn off automatic rescaling of intensity values.
+  //! Turn off automatic rescaling of stored pixel values.
   /*!
-   *  By default, if the RescaleSlope and RescaleIntercept values differ
-   *  between slices (as occurs for all PET images and some CT images),
-   *  then the reader will adjust the pixel values for the slices so
-   *  that the same RescaleSlope and RescaleIntercept can be used for
-   *  all slices.  This adjustment is a lossy process, so a preferable
-   *  option is to call AutoRescaleOff() and use vtkDICOMApplyRescale
-   *  to apply the pixel value rescaling instead.
+   *  By default, if the RescaleSlope and RescaleIntercept attributes
+   *  are present in the DICOM data set, they will be used to rescale
+   *  stored pixel values according to the DICOM modality LUT operation.
+   *  The resulting values will be stored as 16-bit integers if possible,
+   *  but single-precision floats will be used if the potential output
+   *  range is greater than can be stored in 16 bits, or if either the
+   *  RescaleSlope or the RescaleIntercept is not an integer.
+   *  If AutoRescale is off, then the data is not rescaled.
    */
   vtkGetMacro(AutoRescale, int);
   vtkSetMacro(AutoRescale, int);
@@ -205,8 +216,14 @@ public:
   //@{
   //! Get the slope and intercept for rescaling the scalar values.
   /*!
-   *  These values allow calibration of the data to real values.
-   *  Use the equation v = u*RescaleSlope + RescaleIntercept.
+   *  If AutoRescale in On (which is the default), then GetRescaleSlope()
+   *  will return 1 and GetRescaleIntercept() will return zero.  Otherwise,
+   *  they will return the RescaleSlope and RescaleIntercept for the data
+   *  set. Use the equation v = u*RescaleSlope + RescaleIntercept.
+   *
+   *  Note that the returned values might not be valid if these attributes
+   *  are not the same for all slices in the series.  Use the meta data to
+   *  retrieve the per-slice slope and intercept.
    */
   double GetRescaleSlope() { return this->RescaleSlope; }
   double GetRescaleIntercept() { return this->RescaleIntercept; }
@@ -220,6 +237,26 @@ public:
    *  SetMemoryRowOrder method for additional information.
    */
   vtkMatrix4x4 *GetPatientMatrix() { return this->PatientMatrix; }
+  //@}
+
+  //@{
+  //! Get the overlay.
+  /*!
+   *  The extent of the overlay will be the same as the main image.
+   *  For multiple overlays, each overlay will be stored in a different
+   *  bit. An 8-bit image will be used if there are eight or fewer
+   *  overlays, and an unsigned 16-bit image will be used if there are
+   *  more than eight overlays.
+   */
+  vtkImageData *GetOverlayOutput();
+  vtkAlgorithmOutput *GetOverlayOutputPort();
+  void SetOverlayOutput(vtkImageData *data);
+
+  //! Returns true if any overlays are present.
+  bool HasOverlay() { return (this->OverlayBitfield != 0); }
+
+  //! Returns a bitfield that indicates which overlays are present.
+  unsigned short GetOverlayBitfield() { return this->OverlayBitfield; }
   //@}
 
   //@{
@@ -248,35 +285,58 @@ public:
   const char *GetMemoryRowOrderAsString();
   //@}
 
+  //@{
+  //! Set the scalar type of the output.
+  /*!
+   *  The default value is -1, which means that the input scalar type will
+   *  be used to set the output scalar type (accounting for any type
+   *  changes required by AutoRescale).  Allowed output scalar types are
+   *  VTK_SIGNED_CHAR, VTK_UNSIGNED_CHAR, VTK_SHORT, VTK_UNSIGNED_SHORT,
+   *  VTK_INT, VTK_UNSIGNED_INT, VTK_FLOAT, or VTK_DOUBLE.  The output
+   *  data values will be clamped to the limits of the output type.
+   */
+  vtkSetMacro(OutputScalarType, int);
+  vtkGetMacro(OutputScalarType, int);
+  //@}
+
+#ifndef __WRAP__
+  //@{
+  using Superclass::Update;
+  //! Update both the image and, if present, the overlay
+  void Update() VTK_DICOM_OVERRIDE;
+  //@}
+#endif
+
 protected:
   vtkDICOMReader();
   ~vtkDICOMReader();
 
-#ifdef VTK_OVERRIDE
   //@{
-  //! Read the header information.
-  virtual int RequestInformation(
+  //! Entry point for all pipeline requests.
+  int ProcessRequest(
     vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector) VTK_OVERRIDE;
+    vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
+
+  //! Read the header information.
+  int RequestInformation(
+    vtkInformation* request, vtkInformationVector** inputVector,
+    vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
 
   //! Read the voxel data.
-  virtual int RequestData(
+  int RequestData(
     vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector) VTK_OVERRIDE;
+    vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
   //@}
-#else
-  //@{
-  //! Read the header information.
-  virtual int RequestInformation(
-    vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector);
 
-  //! Read the voxel data.
-  virtual int RequestData(
-    vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector);
+  //@{
+  //! Read the overlays into an allocated vtkImageData object.
+  virtual bool ReadOverlays(vtkImageData *data);
+
+  //! Unpack overlay bits to build the overlay image.
+  void UnpackOverlay(
+    const void *filePtr, vtkIdType bitskip, vtkIdType count,
+    void *buffer, vtkIdType incr, int bit);
   //@}
-#endif
 
   //@{
   //! Read one file.  Specify the offset to the PixelData.
@@ -284,9 +344,17 @@ protected:
     const char *filename, int idx,
     unsigned char *buffer, vtkIdType bufferSize);
 
+  //! Clear or sign-extend any bits beyond BitsStored.
+  void MaskBits(void *buffer, vtkIdType bufferSize, int scalarSize,
+                int bitsStored, int pixelRepresentation);
+
   //! Unpack 1 bit to 8 bits or 12 bits to 16 bits.
   void UnpackBits(
     const void *source, void *buffer, vtkIdType bufferSize, int bits);
+
+  //! Unpack 4:2:2 color data.
+  void UnpackYBR422(
+    const void *source, void *buffer, vtkIdType bufferSize, vtkIdType rowlen);
 
   //! Read an DICOM file directly.
   virtual bool ReadFileNative(
@@ -300,9 +368,15 @@ protected:
   //@}
 
   //@{
+  //! Check if rescaling will change scalar type.
+  virtual int ComputeRescaledScalarType(
+    int scalarType, int bitsStored, int pixelRepresentation);
+
   //! Rescale the data in the buffer.
   virtual void RescaleBuffer(
-    int fileIdx, int frameIdx, void *buffer, vtkIdType bufferSize);
+    int fileIdx, int frameIdx, int fileType, int outputType,
+    int numFileComponents, int numComponents,
+    void *fileBuffer, void *outputBuffer, vtkIdType bufferSize);
 
   //! Convert buffer from YUV to RGB.
   virtual void YBRToRGB(
@@ -351,6 +425,12 @@ protected:
   //! The MedicalImageProperties, for compatibility with other readers.
   vtkMedicalImageProperties *MedicalImageProperties;
 
+  //! The default character set to use while parsing the file.
+  vtkDICOMCharacterSet DefaultCharacterSet;
+
+  //! Whether the default should override SpecificCharacterSet.
+  bool OverrideCharacterSet;
+
   //! The parser that is used to read the file.
   vtkDICOMParser *Parser;
 
@@ -375,6 +455,8 @@ protected:
   //! This indicates that the data must be rescaled.
   int NeedsRescale;
   int AutoRescale;
+  int FileScalarType;
+  int OutputScalarType;
 
   //! This indicates that the data must be converted to RGB.
   int NeedsYBRToRGB;
@@ -398,13 +480,17 @@ protected:
   //! The stack to load.
   char DesiredStackID[20];
 
+  //! Bitfield that says what overlays are present.
+  unsigned short OverlayBitfield;
+  bool UpdateOverlayFlag;
+
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMReader(const vtkDICOMReader&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMReader&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMReader(const vtkDICOMReader&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMReader&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMReader(const vtkDICOMReader&);
-  void operator=(const vtkDICOMReader&);
+  vtkDICOMReader(const vtkDICOMReader&) = delete;
+  void operator=(const vtkDICOMReader&) = delete;
 #endif
 };
 

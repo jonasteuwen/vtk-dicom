@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2016 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -24,8 +24,8 @@
 #include "mainmacro.h"
 #include "readquery.h"
 
-#include <vtkStringArray.h>
-#include <vtkSmartPointer.h>
+#include "vtkStringArray.h"
+#include "vtkSmartPointer.h"
 
 #ifndef _WIN32
 // includes for execvp
@@ -52,7 +52,7 @@ void dicomfind_version(FILE *file, const char *cp)
 {
   fprintf(file, "%s %s\n", cp, DICOM_VERSION);
   fprintf(file, "\n"
-    "Copyright (c) 2012-2016, David Gobbi.\n\n"
+    "Copyright (c) 2012-2019, David Gobbi.\n\n"
     "This software is distributed under an open-source license.  See the\n"
     "Copyright.txt file that comes with the vtk-dicom source distribution.\n");
 }
@@ -63,23 +63,25 @@ void dicomfind_usage(FILE *file, const char *cp)
   fprintf(file, "usage:\n"
     "  %s [options] <directory> ...\n\n", cp);
   fprintf(file, "options:\n"
-    "  -L              Follow symbolic links (default).\n"
-    "  -P              Do not follow symbolic links.\n"
-    "  -k tag=value    Provide an attribute to be queried and matched.\n"
-    "  -q <query.txt>  Provide a file to describe the find query.\n"
-    "  -u <uids.txt>   Provide a file that contains a list of UIDs.\n"
-    "  -maxdepth n     Set the maximum directory depth.\n"
-    "  -name pattern   Set a pattern to match (with \"*\" or \"?\").\n"
-    "  -image          Restrict the search to files with PixelData.\n"
-    "  -series         Find all files in series if even one file matches.\n"
-    "  -print          Print the filenames of all matched files (default).\n"
-    "  -print0         Print the filenames with terminating null, for xargs.\n"
-    "  -exec ... +     Execute the given command for every series matched.\n"
-    "  -exec ... %s    Execute the given command for every file matched.\n"
-    "  -execdir ... +  Go to directory and execute command on every series.\n"
-    "  -execdir ... %s Go to directory and execute command on every file.\n"
-    "  --help          Print a brief help message.\n"
-    "  --version       Print the software version.\n",
+    "  -L                Follow symbolic links (default).\n"
+    "  -P                Do not follow symbolic links.\n"
+    "  -k tag=value      Provide an attribute to be queried and matched.\n"
+    "  -q <query.txt>    Provide a file to describe the find query.\n"
+    "  -u <uids.txt>     Provide a file that contains a list of UIDs.\n"
+    "  -maxdepth n       Set the maximum directory depth.\n"
+    "  -name pattern     Set a pattern to match (with \"*\" or \"?\").\n"
+    "  -image            Restrict the search to files with PixelData.\n"
+    "  -series           Find all files in series if even one file matches.\n"
+    "  -print            Print the filenames of all matched files (default).\n"
+    "  -print0           Print the filenames with terminating null, for xargs.\n"
+    "  -exec ... +       Execute the given command for every series matched.\n"
+    "  -exec ... %s      Execute the given command for every file matched.\n"
+    "  -execdir ... +    Go to directory and execute command on every series.\n"
+    "  -execdir ... %s   Go to directory and execute command on every file.\n"
+    "  --ignore-dicomdir Ignore the DICOMDIR file even if it is present.\n"
+    "  --charset <cs>    Charset to use if SpecificCharacterSet is missing.\n"
+    "  --help            Print a brief help message.\n"
+    "  --version         Print the software version.\n",
 #ifndef _WIN32
     "\\;", "\\;"
 #else
@@ -563,23 +565,23 @@ int MAINMACRO(int argc, char *argv[])
 
   int rval = 0;
   int scandepth = std::numeric_limits<int>::max();
-  bool followSymlinks = true;
   const char *pattern = "";
   QueryTagList qtlist;
   vtkDICOMItem query;
+  bool followSymlinks = true;
+  bool ignoreDicomdir = false;
   bool requirePixelData = false;
   bool findSeries = false;
+  vtkDICOMCharacterSet charset;
 
   vtkSmartPointer<vtkStringArray> a = vtkSmartPointer<vtkStringArray>::New();
 
   // always query SpecificCharacterSet
-  query.SetAttributeValue(DC::SpecificCharacterSet, vtkDICOMValue(VR::CS));
+  query.Set(DC::SpecificCharacterSet, vtkDICOMValue(VR::CS));
 
   // always query the functional sequences for advanced files
-  query.SetAttributeValue(
-    DC::SharedFunctionalGroupsSequence, vtkDICOMValue(VR::SQ));
-  query.SetAttributeValue(
-    DC::PerFrameFunctionalGroupsSequence, vtkDICOMValue(VR::SQ));
+  query.Set(DC::SharedFunctionalGroupsSequence, vtkDICOMValue(VR::SQ));
+  query.Set(DC::PerFrameFunctionalGroupsSequence, vtkDICOMValue(VR::SQ));
 
   if (argc < 2)
   {
@@ -712,6 +714,27 @@ int MAINMACRO(int argc, char *argv[])
       }
       argi = argj;
     }
+    else if (strcmp(arg, "--ignore-dicomdir") == 0)
+    {
+      ignoreDicomdir = true;
+    }
+    else if (strcmp(arg, "--charset") == 0)
+    {
+      ++argi;
+      if (argi == argc || argv[argi][0] == '-')
+      {
+        fprintf(stderr, "%s must be followed by a valid character set\n\n",
+                arg);
+        return 1;
+      }
+      charset = vtkDICOMCharacterSet(argv[argi]);
+      if (charset.GetKey() == vtkDICOMCharacterSet::Unknown)
+      {
+        fprintf(stderr, "%s %s is not a known character set\n\n",
+                arg, argv[argi]);
+        return 1;
+      }
+    }
     else if (arg[0] == '-')
     {
       fprintf(stderr, "unrecognized option %s.\n\n", arg);
@@ -738,10 +761,12 @@ int MAINMACRO(int argc, char *argv[])
   {
     vtkSmartPointer<vtkDICOMDirectory> finder =
       vtkSmartPointer<vtkDICOMDirectory>::New();
+    finder->SetDefaultCharacterSet(charset);
     finder->SetInputFileNames(a);
     finder->SetFilePattern(pattern);
     finder->SetScanDepth(scandepth);
     finder->SetFindQuery(query);
+    finder->SetIgnoreDicomdir(ignoreDicomdir);
     finder->SetFollowSymlinks(followSymlinks);
     finder->SetRequirePixelData(requirePixelData);
     finder->SetFindLevel(

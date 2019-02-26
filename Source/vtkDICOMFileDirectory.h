@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -14,8 +14,9 @@
 #ifndef vtkDICOMFileDirectory_h
 #define vtkDICOMFileDirectory_h
 
-#include <vtkSystemIncludes.h>
+#include "vtkSystemIncludes.h"
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
 
 #include <string> // Interface type
 
@@ -64,10 +65,13 @@ public:
 
   //@{
   //! Get the number of files and subdirectories in the directory.
-  int GetNumberOfFiles() { return this->NumberOfFiles; }
+  int GetNumberOfEntries() { return this->NumberOfEntries; }
 
   //! Get the name of the ith file or subdirectory.
-  const char *GetFile(int i);
+  /*!
+   *  The entries do not include "." or "..".
+   */
+  const char *GetEntry(int i);
 
   //! Check if the list entry is a directory.
   bool IsDirectory(int i);
@@ -133,7 +137,7 @@ private:
 
   std::string Name;
   int Error;
-  int NumberOfFiles;
+  int NumberOfEntries;
   Entry *Entries;
 };
 

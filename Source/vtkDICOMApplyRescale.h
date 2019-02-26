@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2016 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -11,16 +11,18 @@
      PURPOSE.  See the above copyright notice for more information.
 
 =========================================================================*/
-/*! \class vtkDICOMApplyRescale
- *  \brief Convert pixels to real-world values.
+/**
+ * \class vtkDICOMApplyRescale
+ * \brief Convert pixels to real-world values.
  *
- *  This filter uses the information in the DICOM meta data to convert the
- *  pixel values to real-world values with known units.  It uses the DICOM
- *  RealWorldValueMapping attributes, if present, otherwise it uses the
- *  RescaleSlope and RescaleIntercept.  If no mapping information is present,
- *  then the pixels are simply converted to floating-point.  Note that if
- *  this filter is used, then AutoRescaleOff() should be set on the reader
- *  to ensure that the reader does not rescale the data.
+ * This filter uses the information in the DICOM meta data to convert the
+ * pixel values to real-world values with known units.  It uses the DICOM
+ * RealWorldValueMapping attributes, if present, otherwise it uses the
+ * RescaleSlope and RescaleIntercept.  If no mapping information is present,
+ * then the pixels are simply converted to floating-point.
+ *
+ * \warning If this filter is used, then AutoRescaleOff() should be set on
+ * the reader to ensure that the reader does not rescale the data.
  */
 
 #ifndef vtkDICOMApplyRescale_h
@@ -41,11 +43,7 @@ public:
   static vtkDICOMApplyRescale *New();
 
   //! Print information about this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
 
   //@{
   //! Set the output data type to float or double (default is double).
@@ -62,44 +60,29 @@ protected:
   vtkDICOMApplyRescale();
   ~vtkDICOMApplyRescale();
 
-#ifdef VTK_OVERRIDE
   int RequestInformation(
     vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector) VTK_OVERRIDE;
+    vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
 
   int RequestData(
     vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector) VTK_OVERRIDE;
+    vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
 
   void ThreadedRequestData(
     vtkInformation *request, vtkInformationVector **inputVector,
     vtkInformationVector *outputVector, vtkImageData ***inData,
-    vtkImageData **outData, int ext[6], int id) VTK_OVERRIDE;
-#else
-  int RequestInformation(
-    vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector);
-
-  int RequestData(
-    vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector);
-
-  void ThreadedRequestData(
-    vtkInformation *request, vtkInformationVector **inputVector,
-    vtkInformationVector *outputVector, vtkImageData ***inData,
-    vtkImageData **outData, int ext[6], int id);
-#endif
+    vtkImageData **outData, int ext[6], int id) VTK_DICOM_OVERRIDE;
 
   vtkDICOMRealWorldMapping *Mapping;
   int OutputScalarType;
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMApplyRescale(const vtkDICOMApplyRescale&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMApplyRescale&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMApplyRescale(const vtkDICOMApplyRescale&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMApplyRescale&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMApplyRescale(const vtkDICOMApplyRescale&);
-  void operator=(const vtkDICOMApplyRescale&);
+  vtkDICOMApplyRescale(const vtkDICOMApplyRescale&) = delete;
+  void operator=(const vtkDICOMApplyRescale&) = delete;
 #endif
 };
 

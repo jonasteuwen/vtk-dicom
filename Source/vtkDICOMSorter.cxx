@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -12,7 +12,7 @@
 
 =========================================================================*/
 #include "vtkDICOMSorter.h"
-#include <vtkObjectFactory.h>
+#include "vtkObjectFactory.h"
 
 vtkStandardNewMacro(vtkDICOMSorter);
 

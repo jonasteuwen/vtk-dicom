@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -46,10 +46,14 @@ public:
 
   //@{
   //! Get a value from an item in the sequence.
+  const vtkDICOMValue &Get(size_t i, vtkDICOMTag tag) const;
+  const vtkDICOMValue &Get(size_t i, const vtkDICOMTagPath &p) const;
   const vtkDICOMValue &GetAttributeValue(
-    size_t i, vtkDICOMTag tag) const;
+    size_t i, vtkDICOMTag tag) const {
+    return this->Get(i, tag); }
   const vtkDICOMValue &GetAttributeValue(
-    size_t i, const vtkDICOMTagPath &p) const;
+    size_t i, const vtkDICOMTagPath &p) const {
+    return this->Get(i, p); }
   //@}
 
   //@{

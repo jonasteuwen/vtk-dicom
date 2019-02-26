@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -14,8 +14,9 @@
 #ifndef vtkDICOMFile_h
 #define vtkDICOMFile_h
 
-#include <vtkSystemIncludes.h>
+#include "vtkSystemIncludes.h"
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
 
 #if defined(_WIN32)
 #define VTK_DICOM_WIN32_IO
@@ -79,7 +80,7 @@ public:
   //! Write data to a file.
   /*!
    *  The number of bytes written will be returned.
-   *  If it is less than the size requested, an error ocurred.
+   *  If it is less than the size requested, an error occurred.
    */
   size_t Write(const unsigned char *data, size_t size);
 

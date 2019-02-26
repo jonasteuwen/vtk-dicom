@@ -73,7 +73,7 @@ while i < len(lines):
         nb.append(rg[k+5])
         k = k + 6
     lines = lines[0:i] + nb + lines[i:]
-    i += 16*len(rg)
+    i += len(nb)
     rg = []
   else:
     # check for and filter out the private tags
@@ -190,7 +190,7 @@ def makedict(lines, creator="DICOM"):
     # get the group, element
     g, e = tag[1:10].split(',')
 
-    # make sure g, e are hexidecimal integers
+    # make sure g, e are hexadecimal integers
     try:
       gi = int(g, 16)
       ei = int(e, 16)
@@ -378,23 +378,23 @@ def printbody(entry_dict, classname):
     print "%sInitializer::%sInitializer()" % (classname,classname)
     print "{"
     print "  if (%sInitializerCounter++ == 0)" % (classname,)
-    print "    {"
+    print "  {"
     print "    for (vtkDICOMDictionary::Dict **dp = PrivateDictData; *dp != NULL; dp++)"
-    print "      {"
+    print "    {"
     print "      vtkDICOMDictionary::AddPrivateDictionary(*dp);"
-    print "      }"
     print "    }"
+    print "  }"
     print "}"
     print
     print "%sInitializer::~%sInitializer()" % (classname,classname)
     print "{"
     print "  if (--%sInitializerCounter == 0)" % (classname,)
-    print "    {"
+    print "  {"
     print "    for (vtkDICOMDictionary::Dict **dp = PrivateDictData; *dp != NULL; dp++)"
-    print "      {"
+    print "    {"
     print "      vtkDICOMDictionary::RemovePrivateDictionary((*dp)->Name);"
-    print "      }"
     print "    }"
+    print "  }"
     print "}"
 
 if privatedict:

@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -23,18 +23,20 @@
 #include "vtkDICOMUtilities.h"
 #include "vtkDICOMVR.h"
 
-#include <vtkObjectFactory.h>
-#include <vtkSmartPointer.h>
-#include <vtkStringArray.h>
-#include <vtkIntArray.h>
-#include <vtkErrorCode.h>
-#include <vtkCommand.h>
-#include <vtkUnsignedShortArray.h>
+#include "vtkObjectFactory.h"
+#include "vtkSmartPointer.h"
+#include "vtkStringArray.h"
+#include "vtkIntArray.h"
+#include "vtkErrorCode.h"
+#include "vtkCommand.h"
+#include "vtkUnsignedShortArray.h"
 
-#include <vtkSQLiteDatabase.h>
-#include <vtkSQLQuery.h>
+#ifdef DICOM_USE_SQLITE
+#include <sqlite3.h>
+#endif
 
 #include <string>
+#include <sstream>
 #include <vector>
 #include <list>
 #include <map>
@@ -93,6 +95,7 @@ struct vtkDICOMDirectory::FileInfo
 {
   unsigned int InstanceNumber;
   const char *FileName;
+  vtkDICOMValue ImageUID;
   vtkDICOMItem ImageRecord;
 };
 
@@ -122,6 +125,80 @@ bool vtkDICOMDirectory::CompareInstance(
 }
 
 //----------------------------------------------------------------------------
+// These are the attributes used for a directory scan
+
+namespace {
+
+static const DC::EnumType ScanTags[] = {
+  // basic required information
+  DC::SpecificCharacterSet, // 1C
+  // image-level information
+  DC::SOPClassUID,          // 1
+  DC::SOPInstanceUID,       // 1
+  DC::InstanceNumber,       // 1
+  DC::Rows,                 // 3
+  DC::Columns,              // 3
+  // series-level information
+  DC::SeriesDate,           // 3
+  DC::SeriesTime,           // 3
+  DC::Modality,             // 1
+  DC::SeriesDescription,    // 3
+  DC::SeriesInstanceUID,    // 1
+  DC::SeriesNumber,         // 1
+  // study-level information
+  DC::StudyDate,            // 1
+  DC::StudyTime,            // 1
+  DC::ReferringPhysicianName, // 3
+  DC::PatientAge,           // 3
+  DC::StudyInstanceUID,     // 1
+  DC::StudyID,              // 1
+  DC::AccessionNumber,      // 2
+  DC::StudyDescription,     // 2
+  // patient-level information
+  DC::PatientName,          // 2
+  DC::PatientID,            // 1
+  DC::PatientBirthDate,     // 3
+  DC::PatientSex,           // 3
+  // delimiter to mark end of list
+  DC::ItemDelimitationItem
+};
+
+static const DC::EnumType SeriesTags[] = {
+  DC::SpecificCharacterSet,
+  DC::SeriesDate,
+  DC::SeriesTime,
+  DC::Modality,
+  DC::SeriesDescription,
+  DC::SeriesInstanceUID,
+  DC::SeriesNumber,
+  DC::ItemDelimitationItem
+};
+
+static const DC::EnumType StudyTags[] = {
+  DC::SpecificCharacterSet,
+  DC::StudyDate,
+  DC::StudyTime,
+  DC::ReferringPhysicianName,
+  DC::PatientAge,
+  DC::StudyInstanceUID,
+  DC::StudyID,
+  DC::AccessionNumber,
+  DC::StudyDescription,
+  DC::ItemDelimitationItem
+};
+
+static const DC::EnumType PatientTags[] = {
+  DC::SpecificCharacterSet,
+  DC::PatientName,
+  DC::PatientID,
+  DC::PatientBirthDate,
+  DC::PatientSex,
+  DC::ItemDelimitationItem
+};
+
+}
+
+//----------------------------------------------------------------------------
 // A temporary container class for use with stl algorithms
 
 class vtkDICOMDirectory::SeriesInfoList
@@ -129,17 +206,64 @@ class vtkDICOMDirectory::SeriesInfoList
 {};
 
 //----------------------------------------------------------------------------
+// A helper class for building a sorted list of unique tags
+class SortedTags : public std::vector<vtkDICOMTag>
+{
+public:
+  void SetFrom(const vtkDICOMItem& patientRecord,
+               const vtkDICOMItem& studyRecord,
+               const vtkDICOMItem& seriesRecord);
+};
+
+void SortedTags::SetFrom(const vtkDICOMItem& patientRecord,
+                         const vtkDICOMItem& studyRecord,
+                         const vtkDICOMItem& seriesRecord)
+{
+  this->clear();
+  this->reserve(patientRecord.GetNumberOfDataElements() +
+                studyRecord.GetNumberOfDataElements() +
+                seriesRecord.GetNumberOfDataElements());
+
+  const vtkDICOMItem *records[3] = {
+    &patientRecord, &studyRecord, &seriesRecord
+  };
+
+  for (int i = 0; i < 3; i++)
+  {
+    vtkDICOMDataElementIterator iter = records[i]->Begin();
+    vtkDICOMDataElementIterator iterEnd = records[i]->End();
+
+    while (iter != iterEnd)
+    {
+      vtkDICOMTag tag = iter->GetTag();
+      std::vector<vtkDICOMTag>::iterator pos =
+        std::lower_bound(begin(), end(), tag);
+      if (pos == end() || *pos != tag)
+      {
+        this->insert(pos, tag);
+      }
+
+      ++iter;
+    }
+  }
+}
+
+//----------------------------------------------------------------------------
 vtkDICOMDirectory::vtkDICOMDirectory()
 {
   this->DirectoryName = 0;
   this->InputFileNames = 0;
   this->FilePattern = 0;
+  this->DefaultCharacterSet = vtkDICOMCharacterSet::GetGlobalDefault();
+  this->OverrideCharacterSet = vtkDICOMCharacterSet::GetGlobalOverride();
   this->Series = new SeriesVector;
   this->Studies = new StudyVector;
   this->Patients = new PatientVector;
   this->Visited = new VisitedVector;
   this->FileSetID = 0;
   this->InternalFileName = 0;
+  this->QueryFiles = -1;
+  this->IgnoreDicomdir = 0;
   this->RequirePixelData = 1;
   this->FollowSymlinks = 1;
   this->ShowHidden = 1;
@@ -147,6 +271,10 @@ vtkDICOMDirectory::vtkDICOMDirectory()
   this->Query = 0;
   this->FindLevel = vtkDICOMDirectory::IMAGE;
   this->UsingOsirixDatabase = false;
+  this->CurrentPatientRecord = 0;
+  this->CurrentStudyRecord = 0;
+  this->CurrentSeriesRecord = 0;
+  this->CurrentImageRecord = 0;
 }
 
 //----------------------------------------------------------------------------
@@ -186,6 +314,13 @@ void vtkDICOMDirectory::PrintSelf(ostream& os, vtkIndent indent)
   os << indent << "FindLevel: "
      << (this->FindLevel == vtkDICOMDirectory::IMAGE ?
          "IMAGE\n" : "SERIES\n");
+
+  os << indent << "QueryFiles: "
+     << (this->QueryFiles == 0 ? "Never\n" :
+         (this->QueryFiles == 1 ? "Always\n" : "Default\n"));
+
+  os << indent << "IgnoreDicomdir: "
+     << (this->IgnoreDicomdir ? "On\n" : "Off\n");
 
   os << indent << "RequirePixelData: "
      << (this->RequirePixelData ? "On\n" : "Off\n");
@@ -388,7 +523,17 @@ vtkDICOMMetaData *vtkDICOMDirectory::GetMetaDataForSeries(int i)
 }
 
 //----------------------------------------------------------------------------
-// The following code does loose matching to accomodate the way that Osirix
+void vtkDICOMDirectory::SetDefaultCharacterSet(vtkDICOMCharacterSet cs)
+{
+  if (this->DefaultCharacterSet != cs)
+  {
+    this->DefaultCharacterSet = cs;
+    this->Modified();
+  }
+}
+
+//----------------------------------------------------------------------------
+// The following code does loose matching to accommodate the way that Osirix
 // modifies some attributes before storing them in its database
 
 namespace {
@@ -485,6 +630,20 @@ bool MatchesOsirixDatabase(
   return matched;
 }
 
+#ifdef DICOM_USE_SQLITE
+
+// Convert Osirix database times (NSDate) to DICOM DT
+std::string ConvertOsirixTime(double t)
+{
+  // Seconds between our time base (00:00:00 UTC Jan 1, 1970)
+  // and Osirix database time base (00:00:00 UTC Jan 1, 2001)
+  const long long timediff = 978307200;
+  long long s = static_cast<long long>(t + (t >= 0 ? 0.5 : -0.5));
+  return vtkDICOMUtilities::GenerateDateTime((s + timediff)*1000000, NULL);
+}
+
+#endif
+
 }
 
 //----------------------------------------------------------------------------
@@ -501,7 +660,7 @@ bool vtkDICOMDirectory::MatchesQuery(
       vtkDICOMTag tag = iter->GetTag();
       if (tag != DC::SpecificCharacterSet && tag.GetGroup() != 0x0004)
       {
-        const vtkDICOMValue& v = this->Query->GetAttributeValue(tag);
+        const vtkDICOMValue& v = this->Query->Get(tag);
         if (v.IsValid())
         {
           const vtkDICOMValue& u = iter->GetValue();
@@ -515,7 +674,7 @@ bool vtkDICOMDirectory::MatchesQuery(
           }
           if (matched)
           {
-            results.SetAttributeValue(tag, u);
+            results.Set(tag, u);
           }
           else
           {
@@ -545,19 +704,20 @@ int vtkDICOMDirectory::MatchesImageQuery(
       const vtkDICOMValue& v = iter->GetValue();
       if (v.GetVR() == vtkDICOMVR::SQ)
       {
-        if (v.GetNumberOfValues() > 0)
+        if (v.GetNumberOfValues() > 0 ||
+            (!results.Get(tag).IsValid() &&
+             !record.Get(tag).IsValid()))
         {
           fullyMatched = false;
-          break;
         }
       }
       else if (tag != DC::SpecificCharacterSet && tag.GetGroup() != 0x0004)
       {
         if (v.GetVL() > 0)
         {
-          if (!results.GetAttributeValue(tag).IsValid())
+          if (!results.Get(tag).IsValid())
           {
-            const vtkDICOMValue& u = record.GetAttributeValue(tag);
+            const vtkDICOMValue& u = record.Get(tag);
             if (!u.IsValid())
             {
               fullyMatched = false;
@@ -568,6 +728,11 @@ int vtkDICOMDirectory::MatchesImageQuery(
               break;
             }
           }
+        }
+        else if (!results.Get(tag).IsValid() &&
+                 !record.Get(tag).IsValid())
+        {
+          fullyMatched = false;
         }
       }
     }
@@ -611,26 +776,35 @@ void vtkDICOMDirectory::AddSeriesWithQuery(
   {
     // Have we checked all the attributes in the query?
     bool fullyMatched = true;
-    vtkDICOMDataElementIterator iter;
-    for (iter = this->Query->Begin(); iter != this->Query->End(); ++iter)
+    if (this->QueryFiles == 1)
     {
-      vtkDICOMTag tag = iter->GetTag();
-      const vtkDICOMValue& v = iter->GetValue();
-      if (v.GetVR() == vtkDICOMVR::SQ)
+      // Always scan files, even if directory records fulfil the query
+      fullyMatched = false;
+    }
+    else if (this->QueryFiles == -1)
+    {
+      // Check for unfulfilled query elements
+      vtkDICOMDataElementIterator iter;
+      for (iter = this->Query->Begin(); iter != this->Query->End(); ++iter)
       {
-        if (v.GetNumberOfValues() > 0)
+        vtkDICOMTag tag = iter->GetTag();
+        const vtkDICOMValue& v = iter->GetValue();
+        if (v.GetVR() == vtkDICOMVR::SQ)
         {
-          fullyMatched = false;
-          break;
+          if (v.GetNumberOfValues() > 0 ||
+              !results.Get(tag).IsValid())
+          {
+            fullyMatched = false;
+            break;
+          }
         }
-      }
-      else if (tag != DC::SpecificCharacterSet && tag.GetGroup() != 0x0004)
-      {
-        if (v.GetVL() > 0 &&
-            !results.GetAttributeValue(tag).IsValid())
+        else if (tag != DC::SpecificCharacterSet && tag.GetGroup() != 0x0004)
         {
-          fullyMatched = false;
-          break;
+          if (!results.Get(tag).IsValid())
+          {
+            fullyMatched = false;
+            break;
+          }
         }
       }
     }
@@ -645,12 +819,12 @@ void vtkDICOMDirectory::AddSeriesWithQuery(
     }
 
     // Need to query against the actual files
-    const vtkDICOMItem **usedImageRecords = imageRecords;
-    std::vector<const vtkDICOMItem *> newImageRecords;
     vtkSmartPointer<vtkDICOMMetaData> meta =
       vtkSmartPointer<vtkDICOMMetaData>::New();
     vtkSmartPointer<vtkDICOMParser> parser =
       vtkSmartPointer<vtkDICOMParser>::New();
+    parser->SetDefaultCharacterSet(this->DefaultCharacterSet);
+    parser->SetOverrideCharacterSet(this->OverrideCharacterSet);
 
     parser->AddObserver(
       vtkCommand::ErrorEvent, this, &vtkDICOMDirectory::RelayError);
@@ -662,10 +836,30 @@ void vtkDICOMDirectory::AddSeriesWithQuery(
       vtkSmartPointer<vtkStringArray>::New();
 
     vtkIdType n = files->GetNumberOfValues();
-    // Only check the first file unless image-level query
-    if (n > 0 && this->FindLevel < vtkDICOMDirectory::IMAGE)
+
+    // Create a new set of image records for the extra info
+    std::vector<vtkDICOMItem> storeImageRecords(n);
+    std::vector<const vtkDICOMItem *> newImageRecords;
+    if (this->FindLevel < vtkDICOMDirectory::IMAGE)
     {
-      n = 1;
+      newImageRecords.resize(n);
+      for (vtkIdType i = 0; i < n; i++)
+      {
+        newImageRecords[i] = &storeImageRecords[i];
+      }
+    }
+
+    // Create a list of tags not to include in image record
+    SortedTags skip;
+    if (this->QueryFiles == 1)
+    {
+      // Scan for all attributes, even ones found in DICOMDIR
+      skip.push_back(DC::SpecificCharacterSet);
+    }
+    else
+    {
+      // Skip any attributes that were found in the DICOMDIR
+      skip.SetFrom(patientRecord, studyRecord, seriesRecord);
     }
 
     for (vtkIdType i = 0; i < n; i++)
@@ -673,18 +867,30 @@ void vtkDICOMDirectory::AddSeriesWithQuery(
       const std::string& fileName = files->GetValue(i);
       bool matched = false;
       int r = this->MatchesImageQuery(*imageRecords[i], results);
-      if (r == 0)
+      const vtkDICOMItem *imageRecord = imageRecords[i];
+      if (r == 0 && this->QueryFiles != 1)
       {
         // All remaining queries were matched by image record
         matched = true;
       }
-      else if (r > 0)
+      else if (r >= 0)
       {
+        // Set info for use by RelayError
+        this->CurrentPatientRecord = &patientRecord;
+        this->CurrentStudyRecord = &studyRecord;
+        this->CurrentSeriesRecord = &seriesRecord;
+        this->CurrentImageRecord = imageRecords[i];
         // Read the file metadata
         meta->Initialize();
         this->SetInternalFileName(fileName.c_str());
         parser->SetFileName(fileName.c_str());
         parser->Update();
+        // Clear info used by RelayError
+        this->CurrentPatientRecord = 0;
+        this->CurrentStudyRecord = 0;
+        this->CurrentSeriesRecord = 0;
+        this->CurrentImageRecord = 0;
+
         if (!parser->GetPixelDataFound())
         {
           if (!this->ErrorCode)
@@ -697,20 +903,22 @@ void vtkDICOMDirectory::AddSeriesWithQuery(
           }
         }
         matched = parser->GetQueryMatched();
+        this->FillImageRecord(&storeImageRecords[i], meta,
+                              &skip[0], skip.size());
+        imageRecord = &storeImageRecords[i];
       }
       if (matched)
       {
         if (this->FindLevel < vtkDICOMDirectory::IMAGE)
         {
-          // Add all the files.
+          // Add all the files if one file matches.
           a = files;
         }
         else
         {
           // Add the matched file.
           a->InsertNextValue(fileName);
-          newImageRecords.push_back(imageRecords[i]);
-          usedImageRecords = &newImageRecords[0];
+          newImageRecords.push_back(imageRecord);
         }
       }
     }
@@ -719,7 +927,7 @@ void vtkDICOMDirectory::AddSeriesWithQuery(
     {
       this->AddSeriesFileNames(
         patient, study, a,
-        patientRecord, studyRecord, seriesRecord, usedImageRecords);
+        patientRecord, studyRecord, seriesRecord, &newImageRecords[0]);
     }
   }
 }
@@ -782,82 +990,29 @@ void vtkDICOMDirectory::AddSeriesFileNames(
     return;
   }
 
-  // Check for files that are duplicate instances
+  // create an object to hold the meta data for each series
+  vtkSmartPointer<vtkDICOMMetaData> meta =
+    vtkSmartPointer<vtkDICOMMetaData>::New();
   int ni = static_cast<int>(files->GetNumberOfValues());
-  std::vector<const vtkDICOMValue *> uids(ni);
+  meta->SetNumberOfInstances(ni);
+
+  // add the image-level information
   for (int ii = 0; ii < ni; ii++)
   {
-    uids[ii] = &imageRecords[ii]->GetAttributeValue(DC::SOPInstanceUID);
-  }
-  std::vector<int> duplicate(ni);
-  std::vector<int> seriesLength;
-  seriesLength.push_back(0);
-  int numberOfDuplicates = 0;
-  for (int ii = 0; ii < ni; ii++)
-  {
-    int count = 0;
-    const vtkDICOMValue *uid = uids[ii];
-    if (uid->GetVL() > 0)
-    {
-      for (int jj = 0; jj < ii; jj++)
-      {
-        if (*(uids[jj]) == *uid)
-        {
-          count++;
-        }
-      }
-    }
-    duplicate[ii] = count;
-    if (count > numberOfDuplicates)
-    {
-      numberOfDuplicates = count;
-      seriesLength.push_back(0);
-    }
-    seriesLength[count]++;
+    this->CopyRecord(meta, imageRecords[ii], ii);
   }
 
-  // Add each duplicate as a separate series
-  for (int kk = 0; kk <= numberOfDuplicates; kk++)
-  {
-    vtkSmartPointer<vtkDICOMMetaData> meta =
-      vtkSmartPointer<vtkDICOMMetaData>::New();
-    meta->SetNumberOfInstances(seriesLength[kk]);
-    this->CopyRecord(meta, &patientRecord, -1);
-    this->CopyRecord(meta, &studyRecord, -1);
-    this->CopyRecord(meta, &seriesRecord, -1);
+  // these must be added after the image-level information
+  this->CopyRecord(meta, &seriesRecord, -1);
+  this->CopyRecord(meta, &studyRecord, -1);
+  this->CopyRecord(meta, &patientRecord, -1);
 
-    vtkSmartPointer<vtkStringArray> newfiles;
-    if (numberOfDuplicates > 0)
-    {
-      newfiles = vtkSmartPointer<vtkStringArray>::New();
-      newfiles->SetNumberOfValues(seriesLength[kk]);
-    }
-    else
-    {
-      newfiles = files;
-    }
-
-    int jj = 0;
-    for (int ii = 0; ii < ni; ii++)
-    {
-      if (duplicate[ii] == kk)
-      {
-        this->CopyRecord(meta, imageRecords[ii], jj);
-        if (numberOfDuplicates > 0)
-        {
-          newfiles->SetValue(jj, files->GetValue(ii));
-        }
-        jj++;
-      }
-    }
-
-    (*this->Studies)[study].LastSeries = series++;
-    this->Series->push_back(SeriesItem());
-    SeriesItem& item = this->Series->back();
-    item.Record = seriesRecord;
-    item.Files = newfiles;
-    item.Meta = meta;
-  }
+  (*this->Studies)[study].LastSeries = series++;
+  this->Series->push_back(SeriesItem());
+  SeriesItem& item = this->Series->back();
+  item.Record = seriesRecord;
+  item.Files = files;
+  item.Meta = meta;
 }
 
 //----------------------------------------------------------------------------
@@ -866,6 +1021,8 @@ void vtkDICOMDirectory::CopyRecord(
 {
   vtkDICOMDataElementIterator iter = item->Begin();
   vtkDICOMDataElementIterator iterEnd = item->End();
+  vtkDICOMDataElementIterator iter2 = meta->Begin();
+  vtkDICOMDataElementIterator iter2End = meta->End();
   for (; iter != iterEnd; ++iter)
   {
     vtkDICOMTag tag = iter->GetTag();
@@ -890,35 +1047,80 @@ void vtkDICOMDirectory::CopyRecord(
       }
     }
 
-    if (instance >= 0)
+    if (instance > 0)
     {
-      meta->SetAttributeValue(instance, tag, iter->GetValue());
+      // check for elements that are missing for this instance,
+      // and insert NULL values to indicate their absence
+      if (iter2 != iter2End)
+      {
+        do
+        {
+          vtkDICOMTag tag2 = iter2->GetTag();
+          if (tag2 > tag)
+          {
+            break;
+          }
+          const vtkDICOMValue &v = iter2->GetValue();
+          ++iter2;
+          if (tag2 == tag)
+          {
+            if (v != iter->GetValue())
+            {
+              meta->Set(instance, tag, iter->GetValue());
+            }
+            break;
+          }
+          meta->Set(instance, tag2, vtkDICOMValue());
+        }
+        while (iter2 != iter2End);
+      }
+      else
+      {
+        meta->Set(instance, tag, iter->GetValue());
+      }
     }
     else
     {
-      meta->SetAttributeValue(tag, iter->GetValue());
+      meta->Set(tag, iter->GetValue());
     }
   }
 }
 
 //----------------------------------------------------------------------------
 void vtkDICOMDirectory::FillImageRecord(
-  vtkDICOMItem *item, vtkDICOMMetaData *meta)
+  vtkDICOMItem *item, vtkDICOMMetaData *meta,
+  const vtkDICOMTag *skip, size_t nskip)
 {
-  static const DC::EnumType tags[] = {
-    DC::SOPClassUID,
-    DC::SOPInstanceUID,
-    DC::InstanceNumber,
-    DC::Rows,
-    DC::Columns,
-    DC::ItemDelimitationItem
-  };
+  // Add all elements that aren't already in the other records
+  // (but always add SpecificCharacterSet)
+  const vtkDICOMTag *skipEnd = (skip == 0 ? 0 : skip + nskip);
 
-  const DC::EnumType *tag = tags;
-  while (*tag != DC::ItemDelimitationItem)
+  vtkDICOMDataElementIterator iter = meta->Begin();
+  vtkDICOMDataElementIterator iterEnd = meta->End();
+
+  // Group 0x0002 should be skipped if not part of query
+  if (!this->Query || this->Query->Begin() == this->Query->End() ||
+      this->Query->Begin()->GetTag().GetGroup() > 0x0002)
   {
-    item->SetAttributeValue(*tag, meta->GetAttributeValue(*tag));
-    tag++;
+    while (iter != iterEnd && iter->GetTag().GetGroup() <= 0x0002)
+    {
+      ++iter;
+    }
+  }
+
+  // Add all other elements unless marked to be skipped
+  while (iter != iterEnd)
+  {
+    vtkDICOMTag tag = iter->GetTag();
+    while (skip != skipEnd && *skip < tag)
+    {
+      ++skip;
+    }
+    if (skip == skipEnd || *skip > tag || tag == DC::SpecificCharacterSet)
+    {
+      item->Set(tag, iter->GetValue());
+    }
+    ++iter;
   }
 }
 
@@ -926,21 +1128,10 @@ void vtkDICOMDirectory::FillImageRecord(
 void vtkDICOMDirectory::FillSeriesRecord(
   vtkDICOMItem *item, vtkDICOMMetaData *meta)
 {
-  static const DC::EnumType tags[] = {
-    DC::SpecificCharacterSet,
-    DC::SeriesDate,
-    DC::SeriesTime,
-    DC::Modality,
-    DC::SeriesDescription,
-    DC::SeriesInstanceUID,
-    DC::SeriesNumber,
-    DC::ItemDelimitationItem
-  };
-
-  const DC::EnumType *tag = tags;
+  const DC::EnumType *tag = SeriesTags;
   while (*tag != DC::ItemDelimitationItem)
   {
-    item->SetAttributeValue(*tag, meta->GetAttributeValue(*tag));
+    item->Set(*tag, meta->Get(*tag));
     tag++;
   }
 }
@@ -949,23 +1140,10 @@ void vtkDICOMDirectory::FillSeriesRecord(
 void vtkDICOMDirectory::FillStudyRecord(
   vtkDICOMItem *item, vtkDICOMMetaData *meta)
 {
-  static const DC::EnumType tags[] = {
-    DC::SpecificCharacterSet,
-    DC::StudyDate,
-    DC::StudyTime,
-    DC::ReferringPhysicianName,
-    DC::PatientAge,
-    DC::StudyInstanceUID,
-    DC::StudyID,
-    DC::AccessionNumber,
-    DC::StudyDescription,
-    DC::ItemDelimitationItem
-  };
-
-  const DC::EnumType *tag = tags;
+  const DC::EnumType *tag = StudyTags;
   while (*tag != DC::ItemDelimitationItem)
   {
-    item->SetAttributeValue(*tag, meta->GetAttributeValue(*tag));
+    item->Set(*tag, meta->Get(*tag));
     tag++;
   }
 }
@@ -974,42 +1152,12 @@ void vtkDICOMDirectory::FillStudyRecord(
 void vtkDICOMDirectory::FillPatientRecord(
   vtkDICOMItem *item, vtkDICOMMetaData *meta)
 {
-  static const DC::EnumType tags[] = {
-    DC::SpecificCharacterSet,
-    DC::PatientName,
-    DC::PatientID,
-    DC::PatientBirthDate,
-    DC::PatientSex,
-    DC::ItemDelimitationItem
-  };
-
-  const DC::EnumType *tag = tags;
+  const DC::EnumType *tag = PatientTags;
   while (*tag != DC::ItemDelimitationItem)
   {
-    item->SetAttributeValue(*tag, meta->GetAttributeValue(*tag));
+    item->Set(*tag, meta->Get(*tag));
     tag++;
   }
-}
-
-//----------------------------------------------------------------------------
-namespace {
-
-unsigned int vtkDICOMDirectoryHashString(const std::string& str)
-{
-  // Compute a string hash based on the function "djb2".
-  unsigned int h = 5381;
-  size_t n = str.size();
-  const char *cp = str.data();
-  for (size_t k = 0; k < n; k++)
-  {
-    unsigned char c = cp[k];
-    if (c == '\0') { break; }
-    h = (h << 5) + h + c;
-  }
-
-  return h;
-}
-
 }
 
 //----------------------------------------------------------------------------
@@ -1021,53 +1169,20 @@ void vtkDICOMDirectory::SortFiles(vtkStringArray *input)
     vtkSmartPointer<vtkDICOMMetaData>::New();
   vtkSmartPointer<vtkDICOMParser> parser =
     vtkSmartPointer<vtkDICOMParser>::New();
+  parser->SetDefaultCharacterSet(this->DefaultCharacterSet);
+  parser->SetOverrideCharacterSet(this->OverrideCharacterSet);
 
   parser->AddObserver(
     vtkCommand::ErrorEvent, this, &vtkDICOMDirectory::RelayError);
 
   parser->SetMetaData(meta);
 
-  // these are the attributes that must be part of the query
-  static const DC::EnumType requiredElements[] = {
-    // basic required information
-    DC::SpecificCharacterSet, // 1C
-    // image-level information
-    DC::SOPClassUID,          // 1
-    DC::SOPInstanceUID,       // 1
-    DC::InstanceNumber,       // 1
-    DC::Rows,                 // 3
-    DC::Columns,              // 3
-    // series-level information
-    DC::SeriesDate,           // 3
-    DC::SeriesTime,           // 3
-    DC::Modality,             // 1
-    DC::SeriesDescription,    // 3
-    DC::SeriesInstanceUID,    // 1
-    DC::SeriesNumber,         // 1
-    // study-level information
-    DC::StudyDate,            // 1
-    DC::StudyTime,            // 1
-    DC::ReferringPhysicianName, // 3
-    DC::PatientAge,           // 3
-    DC::StudyInstanceUID,     // 1
-    DC::StudyID,              // 1
-    DC::AccessionNumber,      // 2
-    DC::StudyDescription,     // 2
-    // patient-level information
-    DC::PatientName,          // 2
-    DC::PatientID,            // 1
-    DC::PatientBirthDate,     // 3
-    DC::PatientSex,           // 3
-    // delimiter to mark end of list
-    DC::ItemDelimitationItem
-  };
-
-  for (const DC::EnumType *tagPtr = requiredElements;
+  for (const DC::EnumType *tagPtr = ScanTags;
        *tagPtr != DC::ItemDelimitationItem;
        ++tagPtr)
   {
     vtkDICOMVR vr = query->FindDictVR(0, *tagPtr);
-    query->SetAttributeValue(*tagPtr, vtkDICOMValue(vr));
+    query->Set(*tagPtr, vtkDICOMValue(vr));
   }
 
   if (this->Query)
@@ -1077,7 +1192,7 @@ void vtkDICOMDirectory::SortFiles(vtkStringArray *input)
     vtkDICOMDataElementIterator iterEnd = this->Query->End();
     while (iter != iterEnd)
     {
-      query->SetAttributeValue(iter->GetTag(), iter->GetValue());
+      query->Set(iter->GetTag(), iter->GetValue());
       ++iter;
     }
     // use a buffer size equal to one disk block
@@ -1086,43 +1201,19 @@ void vtkDICOMDirectory::SortFiles(vtkStringArray *input)
 
   parser->SetQuery(query);
 
+  // To hold a list of tags to skip at the image level, because they
+  // will be stored at patient, study, or series level instead
+  SortedTags skip;
+
+  // List of files
   SeriesInfoList sortedFiles;
   SeriesInfoList::iterator li;
 
   vtkIdType numberOfStrings = input->GetNumberOfValues();
 
-  // Hash table for efficiently checking for duplicates
-  typedef std::vector<vtkIdType> rowType;
-  typedef std::vector<rowType> tableType;
-  tableType dupcheck(numberOfStrings/4 + 1);
-  std::vector<std::string> realnames;
-  realnames.reserve(numberOfStrings);
-
   for (vtkIdType j = 0; j < numberOfStrings; j++)
   {
     const std::string& fileName = input->GetValue(j);
-
-    // Check to see if this file name has already appeared, this is
-    // done with a hash table and is an O(n) check, which is better
-    // than using std::map at O(n log n) or brute-force at O(n^2)
-    realnames.push_back(vtkDICOMFilePath(fileName).GetRealPath());
-    const std::string& realname = realnames.back();
-    unsigned int hash = vtkDICOMDirectoryHashString(realname);
-    hash = hash % dupcheck.size();
-    rowType& row = dupcheck[hash];
-    rowType::iterator iter = row.begin();
-    for (; iter != row.end(); ++iter)
-    {
-      if (realnames[*iter] == realname)
-      {
-        break;
-      }
-    }
-    if (iter != row.end())
-    {
-      continue;
-    }
-    row.push_back(j);
 
     // Skip anything that does not look like a DICOM file.
     if (!vtkDICOMUtilities::IsDICOMFile(fileName.c_str()))
@@ -1203,24 +1294,17 @@ void vtkDICOMDirectory::SortFiles(vtkStringArray *input)
 
     // Insert the file into the sorted list
     FileInfo fileInfo;
-    fileInfo.InstanceNumber =
-      meta->GetAttributeValue(DC::InstanceNumber).AsUnsignedInt();
+    fileInfo.InstanceNumber = meta->Get(DC::InstanceNumber).AsUnsignedInt();
     fileInfo.FileName = fileName.c_str(); // stored in input StringArray
+    fileInfo.ImageUID = meta->Get(DC::SOPInstanceUID);
 
-    const vtkDICOMValue& patientNameValue =
-      meta->GetAttributeValue(DC::PatientName);
-    const vtkDICOMValue& patientIDValue =
-      meta->GetAttributeValue(DC::PatientID);
-    const vtkDICOMValue& studyDateValue =
-      meta->GetAttributeValue(DC::StudyDate);
-    const vtkDICOMValue& studyTimeValue =
-      meta->GetAttributeValue(DC::StudyTime);
-    const vtkDICOMValue& studyUIDValue =
-      meta->GetAttributeValue(DC::StudyInstanceUID);
-    const vtkDICOMValue& seriesUIDValue =
-      meta->GetAttributeValue(DC::SeriesInstanceUID);
-    unsigned int seriesNumber =
-      meta->GetAttributeValue(DC::SeriesNumber).AsUnsignedInt();
+    const vtkDICOMValue& patientNameValue = meta->Get(DC::PatientName);
+    const vtkDICOMValue& patientIDValue = meta->Get(DC::PatientID);
+    const vtkDICOMValue& studyDateValue = meta->Get(DC::StudyDate);
+    const vtkDICOMValue& studyTimeValue = meta->Get(DC::StudyTime);
+    const vtkDICOMValue& studyUIDValue = meta->Get(DC::StudyInstanceUID);
+    const vtkDICOMValue& seriesUIDValue = meta->Get(DC::SeriesInstanceUID);
+    unsigned int seriesNumber = meta->Get(DC::SeriesNumber).AsUnsignedInt();
 
     const char *patientName = patientNameValue.GetCharData();
     const char *patientID = patientIDValue.GetCharData();
@@ -1228,6 +1312,7 @@ void vtkDICOMDirectory::SortFiles(vtkStringArray *input)
     const char *studyTime = studyTimeValue.GetCharData();
     const char *studyUID = studyUIDValue.GetCharData();
     const char *seriesUID = seriesUIDValue.GetCharData();
+    const char *imageUID = fileInfo.ImageUID.GetCharData();
 
     patientName = (patientName ? patientName : "");
     patientID = (patientID ? patientID : "");
@@ -1284,11 +1369,43 @@ void vtkDICOMDirectory::SortFiles(vtkStringArray *input)
       }
       if (c == 0 && seriesUID != 0)
       {
+        // Use UID to identify the image, but use instance number to sort.
+        bool sameFile = false;
+        bool repeatUID = false;
+        for (std::vector<FileInfo>::iterator im = li->Files.begin();
+             im != li->Files.end(); ++im)
+        {
+          if (vtkDICOMUtilities::CompareUIDs(
+                imageUID, im->ImageUID.GetCharData()) == 0)
+          {
+            // Duplicate UID! Check InstanceNumber.
+            if (im->InstanceNumber == fileInfo.InstanceNumber)
+            {
+              sameFile = vtkDICOMFile::SameFile(
+                im->FileName, fileInfo.FileName);
+              repeatUID = true;
+              break;
+            }
+            else if (imageUID && imageUID[0] != '\0')
+            {
+              repeatUID = true;
+            }
+          }
+        }
+        if (repeatUID)
+        {
+          if (sameFile)
+          {
+            break;
+          }
+          continue;
+        }
+
         std::vector<FileInfo>::iterator pos =
           li->Files.insert(
             std::upper_bound(li->Files.begin(), li->Files.end(), fileInfo,
               CompareInstance), fileInfo);
-        this->FillImageRecord(&pos->ImageRecord, meta);
+        this->FillImageRecord(&pos->ImageRecord, meta, &skip[0], skip.size());
         li->QueryMatched |= queryMatched;
         foundSeries = true;
         break;
@@ -1313,7 +1430,9 @@ void vtkDICOMDirectory::SortFiles(vtkStringArray *input)
       this->FillPatientRecord(&li->PatientRecord, meta);
       this->FillStudyRecord(&li->StudyRecord, meta);
       this->FillSeriesRecord(&li->SeriesRecord, meta);
-      this->FillImageRecord(&li->Files.back().ImageRecord, meta);
+      skip.SetFrom(li->PatientRecord, li->StudyRecord, li->SeriesRecord);
+      this->FillImageRecord(&li->Files.back().ImageRecord, meta,
+                            &skip[0], skip.size());
     }
   }
 
@@ -1360,11 +1479,12 @@ void vtkDICOMDirectory::SortFiles(vtkStringArray *input)
 }
 
 //----------------------------------------------------------------------------
+#ifdef DICOM_USE_SQLITE
 namespace {
 
 // Trivial structs needed by ProcessOsirixDatabase
 struct StudyRow { vtkVariant col[12]; };
-struct SeriesRow { vtkVariant col[8]; };
+struct SeriesRow { vtkVariant col[9]; };
 struct ImageRow { vtkVariant col[7]; };
 
 // Decompress a SOPInstanceUID from an Osirix database
@@ -1391,31 +1511,139 @@ std::string DecompressUID(const std::string& s)
   return std::string(uid, m);
 }
 
+// A class to simplify SQLite transaction
+class SimpleSQL
+{
+public:
+  SimpleSQL() : DBase(0), Statement(0), InTransaction(false) {}
+  ~SimpleSQL() { this->Close(); }
+  bool Open(const char *fname);
+  void Close();
+  bool Prepare(const char *query);
+  bool Next();
+  vtkVariant GetValue(int column);
+  const char *GetError();
+private:
+  void Finalize();
+  sqlite3 *DBase;
+  sqlite3_stmt *Statement;
+  bool InTransaction;
+};
+
+bool SimpleSQL::Open(const char *fname)
+{
+  int r = sqlite3_open_v2(fname, &this->DBase, SQLITE_OPEN_READONLY, NULL);
+  if (r == SQLITE_OK)
+  {
+    char *errmsg;
+    r = sqlite3_exec(this->DBase, "BEGIN TRANSACTION", NULL, NULL, &errmsg);
+    this->InTransaction = (r == SQLITE_OK);
+  }
+  return (r == SQLITE_OK);
 }
+
+void SimpleSQL::Close()
+{
+  this->Finalize();
+  if (this->InTransaction)
+  {
+    char *errmsg;
+    sqlite3_exec(this->DBase, "COMMIT", NULL, NULL, &errmsg);
+  }
+  sqlite3_close(this->DBase);
+  this->DBase = 0;
+}
+
+bool SimpleSQL::Prepare(const char *query)
+{
+  if (this->Statement)
+  {
+    sqlite3_finalize(this->Statement);
+    this->Statement = 0;
+  }
+  const char *ep;
+  int l = static_cast<int>(strlen(query));
+  return (sqlite3_prepare_v2(this->DBase, query, l, &this->Statement, &ep)
+          == SQLITE_OK);
+}
+
+bool SimpleSQL::Next()
+{
+  int result = sqlite3_step(this->Statement);
+  if (result == SQLITE_ROW)
+  {
+    return true;
+  }
+
+  this->Finalize();
+  return false;
+}
+
+vtkVariant SimpleSQL::GetValue(int column)
+{
+  vtkVariant v;
+  switch (sqlite3_column_type(this->Statement, column))
+  {
+    case SQLITE_INTEGER:
+    {
+      vtkTypeInt64 x = sqlite3_column_int64(this->Statement, column);
+      v = vtkVariant(x);
+      break;
+    }
+    case SQLITE_FLOAT:
+    {
+      double x = sqlite3_column_double(this->Statement, column);
+      v = vtkVariant(x);
+      break;
+    }
+    case SQLITE_TEXT:
+    {
+      const char *x = reinterpret_cast<const char *>(
+        sqlite3_column_text(this->Statement, column));
+      v = vtkVariant(x);
+      break;
+    }
+    case SQLITE_BLOB:
+    {
+      const char *x = static_cast<const char *>(
+        sqlite3_column_blob(this->Statement, column));
+      size_t l = sqlite3_column_bytes(this->Statement, column);
+      v = vtkVariant(vtkStdString(x, l));
+      break;
+    }
+    default:
+      break;
+  }
+  return v;
+}
+
+const char *SimpleSQL::GetError()
+{
+  return sqlite3_errmsg(this->DBase);
+}
+
+void SimpleSQL::Finalize()
+{
+  if (this->Statement)
+  {
+    sqlite3_finalize(this->Statement);
+    this->Statement = 0;
+  }
+}
+
+}
+#endif
 
 //----------------------------------------------------------------------------
 void vtkDICOMDirectory::ProcessOsirixDatabase(const char *fname)
 {
-  // Open the database
-  vtkSmartPointer<vtkSQLiteDatabase> dbase =
-    vtkSmartPointer<vtkSQLiteDatabase>::New();
-  dbase->SetDatabaseFileName(fname);
-  if (!dbase->Open("", vtkSQLiteDatabase::USE_EXISTING))
-  {
-    vtkErrorMacro("Unable to open database file " << fname);
-    return;
-  }
+#ifdef DICOM_USE_SQLITE
+  SimpleSQL dbase;
 
-  // Make sure this is an OsiriX database file.
-  vtkStringArray *tables = dbase->GetTables();
-  int count = 0;
-  for (vtkIdType i = 0; i < tables->GetNumberOfValues(); i++)
+  // Open the database
+  if (!dbase.Open(fname))
   {
-    std::string s = tables->GetValue(i);
-    count += (s == "ZSTUDY" || s == "ZSERIES" || s == "ZIMAGE");
-  }
-  if (count != 3)
-  {
+    vtkErrorMacro("File " << fname << ": " << dbase.GetError());
     return;
   }
 
@@ -1423,8 +1651,6 @@ void vtkDICOMDirectory::ProcessOsirixDatabase(const char *fname)
   vtkDICOMFilePath path(fname);
   path.PopBack();
   path.PushBack("DATABASE.noindex");
-
-  vtkSQLQuery *q = dbase->GetQueryInstance();
 
   // Indices to columns in the study table
   enum {
@@ -1435,8 +1661,8 @@ void vtkDICOMDirectory::ProcessOsirixDatabase(const char *fname)
 
   // Indices to columns in the series table
   enum {
-    SE_PK, SE_ID, SE_DATE, SE_SERIESSOPCLASSUID, SE_MODALITY,
-    SE_NAME, SE_SERIESDICOMUID, SE_SERIESDESCRIPTION, SE_NCOLS
+    SE_PK, SE_ID, SE_NUMBEROFIMAGES, SE_DATE, SE_SERIESSOPCLASSUID,
+    SE_MODALITY, SE_NAME, SE_SERIESDICOMUID, SE_SERIESDESCRIPTION, SE_NCOLS
   };
 
   // Indices to columns in the image table
@@ -1450,89 +1676,78 @@ void vtkDICOMDirectory::ProcessOsirixDatabase(const char *fname)
   std::vector<SeriesRow> seriesTable;
   std::vector<ImageRow> imageTable;
 
-  // Acquire a shared lock while reading the three tables, to ensure that
-  // the three tables are consistent with each other.
-  q->BeginTransaction();
-
   // Read the study table
-  if (!q->SetQuery("select Z_PK,ZDATE,ZDATEOFBIRTH,ZMODALITY,ZNAME,"
-                   "ZINSTITUTIONNAME,ZSTUDYNAME,ZID,ZSTUDYINSTANCEUID,"
-                   "ZACCESSIONNUMBER,ZPATIENTSEX,ZPATIENTID from ZSTUDY"
-                   " order by ZDATE") ||
-      !q->Execute())
+  // (Note that any "*NAME*" is slightly mangled, and ZDATE gives the
+  // date/time of the first acquisition, rather than the study date/time)
+  if (!dbase.Prepare("select Z_PK,ZDATE,ZDATEOFBIRTH,ZMODALITY,ZNAME,"
+                     "ZINSTITUTIONNAME,ZSTUDYNAME,ZID,ZSTUDYINSTANCEUID,"
+                     "ZACCESSIONNUMBER,ZPATIENTSEX,ZPATIENTID from ZSTUDY"
+                     " order by ZDATE"))
   {
-    vtkErrorMacro("Badly structured ZSTUDY table: " << fname);
-    q->CommitTransaction();
-    q->Delete();
+    vtkErrorMacro("File " << fname << ": " << dbase.GetError());
     return;
   }
 
-  while (q->NextRow())
+  while (dbase.Next())
   {
     studyTable.push_back(StudyRow());
     StudyRow *row = &studyTable.back();
     for (int k = 0; k < ST_NCOLS; k++)
     {
-      row->col[k] = q->DataValue(k);
+      row->col[k] = dbase.GetValue(k);
     }
   }
 
   // Read the series table
-  if (!q->SetQuery("select Z_PK,ZID,ZDATE,ZSERIESSOPCLASSUID,"
-                   "ZMODALITY,ZNAME,ZSERIESDICOMUID,ZSERIESDESCRIPTION,"
-                   "ZSTUDY from ZSERIES order by ZSTUDY,ZID") ||
-      !q->Execute())
+  // (Note that any "*NAME*" is slightly mangled, and ZDATE gives the
+  // date/time of the first acquisition, rather than the series date/time)
+  if (!dbase.Prepare("select Z_PK,ZID,ZNUMBEROFIMAGES,ZDATE,"
+                     "ZSERIESSOPCLASSUID,ZMODALITY,ZNAME,ZSERIESDICOMUID,"
+                     "ZSERIESDESCRIPTION,ZSTUDY from ZSERIES"
+                     " order by ZSTUDY,ZID"))
   {
-    vtkErrorMacro("Badly structured ZSERIES table: " << fname);
-    q->CommitTransaction();
-    q->Delete();
+    vtkErrorMacro("File " << fname << ": " << dbase.GetError());
     return;
   }
 
   std::vector<vtkTypeInt64> zseriesVec;
-  while (q->NextRow())
+  while (dbase.Next())
   {
     seriesTable.push_back(SeriesRow());
     SeriesRow *row = &seriesTable.back();
     for (int k = 0; k < SE_NCOLS; k++)
     {
-      row->col[k] = q->DataValue(k);
+      row->col[k] = dbase.GetValue(k);
     }
-    zseriesVec.push_back(q->DataValue(SE_NCOLS).ToTypeInt64());
+    zseriesVec.push_back(dbase.GetValue(SE_NCOLS).ToTypeInt64());
   }
 
   // Read the image table
-  if (!q->SetQuery("select ZINSTANCENUMBER,ZFRAMEID,ZPATHNUMBER,"
-                   "ZPATHSTRING,ZCOMPRESSEDSOPINSTANCEUID,"
-                   "ZSTOREDHEIGHT,ZSTOREDWIDTH,ZSERIES"
-                   " from ZIMAGE order by"
-                   " ZSERIES,ZINSTANCENUMBER") ||
-      !q->Execute())
+  // (Note that ZSTOREDHEIGHT, ZSTOREDWIDTH are sometimes NULL)
+  if (!dbase.Prepare("select ZINSTANCENUMBER,ZFRAMEID,ZPATHNUMBER,"
+                     "ZPATHSTRING,ZCOMPRESSEDSOPINSTANCEUID,"
+                     "ZSTOREDHEIGHT,ZSTOREDWIDTH,ZSERIES"
+                     " from ZIMAGE order by"
+                     " ZSERIES,ZINSTANCENUMBER"))
   {
-    vtkErrorMacro("Badly structured IMAGE table: " << fname);
-    q->CommitTransaction();
-    q->Delete();
+    vtkErrorMacro("File " << fname << ": " << dbase.GetError());
     return;
   }
 
   std::vector<vtkTypeInt64> zimageVec;
-  while (q->NextRow())
+  while (dbase.Next())
   {
     imageTable.push_back(ImageRow());
     ImageRow *row = &imageTable.back();
     for (int k = 0; k < IM_NCOLS; k++)
     {
-      row->col[k] = q->DataValue(k);
+      row->col[k] = dbase.GetValue(k);
     }
-    zimageVec.push_back(q->DataValue(IM_NCOLS).ToTypeInt64());
+    zimageVec.push_back(dbase.GetValue(IM_NCOLS).ToTypeInt64());
   }
 
-  // Close the database and delete it by setting the smart pointer to NULL.
-  // Calling CommitTransaction doesn't write anything, because only SELECT
-  // has been used.  Instead, it just releases the shared lock.
-  q->CommitTransaction();
-  q->Delete();
-  dbase = NULL;
+  // Release the database
+  dbase.Close();
 
   // To track progress, count number of images processed.
   size_t imageCounter = 0;
@@ -1557,37 +1772,44 @@ void vtkDICOMDirectory::ProcessOsirixDatabase(const char *fname)
     std::string name = st->col[ST_NAME].ToString();
     std::string patientID = st->col[ST_PATIENTID].ToString();
 
-    // Seconds between our time base and database time base
-    const double timediff = 978307200.0;
     double studySeconds = st->col[ST_DATE].ToDouble();
     double birthSeconds = st->col[ST_DATEOFBIRTH].ToDouble();
-    std::string studyDT = vtkDICOMUtilities::GenerateDateTime(
-      static_cast<long long>((studySeconds + timediff)*1e6), NULL);
-    std::string birthDT = vtkDICOMUtilities::GenerateDateTime(
-      static_cast<long long>((birthSeconds + timediff)*1e6), NULL);
+    std::string studyDT = ConvertOsirixTime(studySeconds);
+    std::string birthDT = ConvertOsirixTime(birthSeconds);
 
-    patientItem.SetAttributeValue(
+    patientItem.Set(
       DC::SpecificCharacterSet, vtkDICOMCharacterSet::ISO_IR_192);
-    patientItem.SetAttributeValue(DC::PatientName, name);
-    patientItem.SetAttributeValue(DC::PatientID, patientID);
-    patientItem.SetAttributeValue(DC::PatientBirthDate, birthDT.substr(0, 8));
-    patientItem.SetAttributeValue(
+    patientItem.Set(DC::PatientName, name);
+    patientItem.Set(DC::PatientID, patientID);
+    if (birthSeconds == 0)
+    {
+      patientItem.Set(DC::PatientBirthDate, "");
+    }
+    else
+    {
+      patientItem.Set(DC::PatientBirthDate, birthDT.substr(0, 8));
+    }
+    patientItem.Set(
       DC::PatientSex, st->col[ST_PATIENTSEX].ToString());
 
-    studyItem.SetAttributeValue(
+    studyItem.Set(
       DC::SpecificCharacterSet, vtkDICOMCharacterSet::ISO_IR_192);
-    studyItem.SetAttributeValue(
-      DC::StudyDescription, st->col[ST_STUDYNAME].ToString());
-    studyItem.SetAttributeValue(
+    std::string studyName = st->col[ST_STUDYNAME].ToString();
+    if (studyName != "Localizers")
+    {
+      studyItem.Set(DC::StudyDescription, studyName);
+    }
+    studyItem.Set(
       DC::StudyID, st->col[ST_ID].ToString());
-    studyItem.SetAttributeValue(
+    studyItem.Set(
       DC::StudyInstanceUID, st->col[ST_STUDYINSTANCEUID].ToString());
-    studyItem.SetAttributeValue(
+    studyItem.Set(
       DC::InstitutionName, st->col[ST_INSTITUTIONNAME].ToString());
-    studyItem.SetAttributeValue(
+    studyItem.Set(
       DC::AccessionNumber, st->col[ST_ACCESSIONNUMBER].ToString());
-    studyItem.SetAttributeValue(DC::StudyDate, studyDT.substr(0,8));
-    studyItem.SetAttributeValue(DC::StudyTime, studyDT.substr(8,13));
+
+    studyItem.Set(DC::StudyDate, studyDT.substr(0,8));
+    studyItem.Set(DC::StudyTime, studyDT.substr(8,13));
 
     int studyIdx = this->GetNumberOfStudies();
     int patientIdx;
@@ -1596,7 +1818,7 @@ void vtkDICOMDirectory::ProcessOsirixDatabase(const char *fname)
     for (patientIdx = 0; patientIdx < firstUnusedPatientIdx; patientIdx++)
     {
       const vtkDICOMItem& pitem = this->GetPatientRecord(patientIdx);
-      const vtkDICOMValue& vid = pitem.GetAttributeValue(DC::PatientID);
+      const vtkDICOMValue& vid = pitem.Get(DC::PatientID);
       if (vid.IsValid() && vid.GetVL() > 0)
       {
         if (patientID.length() > 0 && vid.Matches(patientID.c_str()))
@@ -1606,7 +1828,7 @@ void vtkDICOMDirectory::ProcessOsirixDatabase(const char *fname)
       }
       else // Use PatientName if PatientID is empty
       {
-        const vtkDICOMValue& vna = pitem.GetAttributeValue(DC::PatientName);
+        const vtkDICOMValue& vna = pitem.Get(DC::PatientName);
         if (vna.IsValid() && vna.GetVL() > 0)
         {
           if (name.length() > 0 && vna.Matches(name.c_str()))
@@ -1633,11 +1855,17 @@ void vtkDICOMDirectory::ProcessOsirixDatabase(const char *fname)
       }
       ++zseriesVecIter;
 
+      if (this->RequirePixelData &&
+          se->col[SE_NUMBEROFIMAGES].ToTypeInt64() == 0)
+      {
+        // If no images, but pixel data is required, then skip
+        continue;
+      }
+
       vtkDICOMItem seriesItem;
       vtkTypeInt64 zseries = se->col[SE_PK].ToTypeInt64();
       double seriesSeconds = se->col[SE_DATE].ToDouble();
-      std::string seriesDT = vtkDICOMUtilities::GenerateDateTime(
-        static_cast<long long>((seriesSeconds + timediff)*1e6), NULL);
+      std::string seriesDT = ConvertOsirixTime(seriesSeconds);
       vtkDICOMValue sopClassUID(
         vtkDICOMVR::UI, se->col[SE_SERIESSOPCLASSUID].ToString());
       std::string seriesUID = se->col[SE_SERIESDICOMUID].ToString();
@@ -1653,19 +1881,17 @@ void vtkDICOMDirectory::ProcessOsirixDatabase(const char *fname)
         seriesUID = seriesUID.substr(k, seriesUID.length()-k);
       }
 
-      seriesItem.SetAttributeValue(
+      seriesItem.Set(
         DC::SpecificCharacterSet, vtkDICOMCharacterSet::ISO_IR_192);
-      seriesItem.SetAttributeValue(
+      seriesItem.Set(
         DC::SeriesDescription, se->col[SE_NAME].ToString());
-      seriesItem.SetAttributeValue(
+      seriesItem.Set(
         DC::ProtocolName, se->col[SE_SERIESDESCRIPTION].ToString());
-      seriesItem.SetAttributeValue(
-        DC::SeriesNumber, se->col[SE_ID].ToString());
-      seriesItem.SetAttributeValue(DC::SeriesInstanceUID, seriesUID);
-      seriesItem.SetAttributeValue(DC::SeriesDate, seriesDT.substr(0,8));
-      seriesItem.SetAttributeValue(DC::SeriesTime, seriesDT.substr(8,13));
-      seriesItem.SetAttributeValue(
-        DC::Modality, se->col[SE_MODALITY].ToString());
+      seriesItem.Set(DC::SeriesNumber, se->col[SE_ID].ToString());
+      seriesItem.Set(DC::SeriesInstanceUID, seriesUID);
+      seriesItem.Set(DC::SeriesDate, seriesDT.substr(0,8));
+      seriesItem.Set(DC::SeriesTime, seriesDT.substr(8,13));
+      seriesItem.Set(DC::Modality, se->col[SE_MODALITY].ToString());
 
       vtkSmartPointer<vtkStringArray> fileNames =
         vtkSmartPointer<vtkStringArray>::New();
@@ -1719,16 +1945,15 @@ void vtkDICOMDirectory::ProcessOsirixDatabase(const char *fname)
         {
           // Add the path to the list of filenames
           vtkDICOMItem imageRecord;
-          imageRecord.SetAttributeValue(DC::SOPClassUID, sopClassUID);
-          imageRecord.SetAttributeValue(
-            DC::SOPInstanceUID,
+          imageRecord.Set(DC::SOPClassUID, sopClassUID);
+          imageRecord.Set(DC::SOPInstanceUID,
             DecompressUID(im->col[IM_COMPRESSEDSOPINSTANCEUID].ToString()));
-          imageRecord.SetAttributeValue(
-            DC::InstanceNumber, im->col[IM_INSTANCENUMBER].ToString());
-          imageRecord.SetAttributeValue(
-            DC::Rows, im->col[IM_STOREDHEIGHT].ToInt());
-          imageRecord.SetAttributeValue(
-            DC::Columns, im->col[IM_STOREDWIDTH].ToInt());
+          imageRecord.Set(DC::InstanceNumber,
+            im->col[IM_INSTANCENUMBER].ToString());
+          int rows = im->col[IM_STOREDHEIGHT].ToInt();
+          if (rows) { imageRecord.Set(DC::Rows, rows); }
+          int cols = im->col[IM_STOREDWIDTH].ToInt();
+          if (cols) { imageRecord.Set(DC::Columns, cols); }
           imageRecordSequence.AddItem(imageRecord);
           fileNames->InsertNextValue(fpath);
           lastpath = fpath;
@@ -1776,6 +2001,10 @@ void vtkDICOMDirectory::ProcessOsirixDatabase(const char *fname)
       }
     }
   }
+#else
+  vtkErrorMacro("File " << fname << ": "
+                << "sqlite was not enabled in the build");
+#endif
 }
 
 //----------------------------------------------------------------------------
@@ -1783,16 +2012,15 @@ void vtkDICOMDirectory::ProcessDirectoryFile(
   const char *dirname, vtkDICOMMetaData *meta)
 {
   // Get the ID of this file set (informative only).
-  if (meta->HasAttribute(DC::FileSetID))
+  if (meta->Has(DC::FileSetID))
   {
-    std::string fileSetID = meta->GetAttributeValue(DC::FileSetID).AsString();
+    std::string fileSetID = meta->Get(DC::FileSetID).AsString();
     this->FileSetID = new char[fileSetID.length() + 1];
     strcpy(this->FileSetID, fileSetID.c_str());
   }
 
   // Get the directory as a sequence.
-  const vtkDICOMValue& seq =
-    meta->GetAttributeValue(DC::DirectoryRecordSequence);
+  const vtkDICOMValue& seq = meta->Get(DC::DirectoryRecordSequence);
   unsigned int n = static_cast<unsigned int>(seq.GetNumberOfValues());
   const vtkDICOMItem *items = seq.GetSequenceData();
 
@@ -1805,8 +2033,7 @@ void vtkDICOMDirectory::ProcessDirectoryFile(
 
   // Get the first entry.
   unsigned int offset =
-    meta->GetAttributeValue(
-      DC::OffsetOfTheFirstDirectoryRecordOfTheRootDirectoryEntity)
+    meta->Get(DC::OffsetOfTheFirstDirectoryRecordOfTheRootDirectoryEntity)
         .AsUnsignedInt();
 
   // This check is just for insurance.
@@ -1858,13 +2085,13 @@ void vtkDICOMDirectory::ProcessDirectoryFile(
       unsigned int j = iter->second;
       iter->second = 0xffffffffu;
 
-      offset = items[j].GetAttributeValue(
+      offset = items[j].Get(
         DC::OffsetOfTheNextDirectoryRecord).AsUnsignedInt();
 
-      offsetOfChild = items[j].GetAttributeValue(
+      offsetOfChild = items[j].Get(
         DC::OffsetOfReferencedLowerLevelDirectoryEntity).AsUnsignedInt();
 
-      entryType = items[j].GetAttributeValue(
+      entryType = items[j].Get(
         DC::DirectoryRecordType).AsString();
 
       if (entryType == "PATIENT")
@@ -1881,8 +2108,7 @@ void vtkDICOMDirectory::ProcessDirectoryFile(
       }
       else if (entryType == "IMAGE" || !this->RequirePixelData)
       {
-        const vtkDICOMValue& fileID =
-          items[j].GetAttributeValue(DC::ReferencedFileID);
+        const vtkDICOMValue& fileID = items[j].Get(DC::ReferencedFileID);
         if (fileID.IsValid())
         {
           size_t m = fileID.GetNumberOfValues();
@@ -1897,11 +2123,11 @@ void vtkDICOMDirectory::ProcessDirectoryFile(
             imageRecords.push_back(&items[j]);
             // sort the files by instance number, they will almost always
             // already be in order so we use a simple algorithm
-            int inst = items[j].GetAttributeValue(DC::InstanceNumber).AsInt();
+            int inst = items[j].Get(DC::InstanceNumber).AsInt();
             while (ki > 0)
             {
               const vtkDICOMItem *prev = imageRecords[--ki];
-              int inst2 = prev->GetAttributeValue(DC::InstanceNumber).AsInt();
+              int inst2 = prev->Get(DC::InstanceNumber).AsInt();
               if (inst < inst2)
               {
                 std::string s = fileNames->GetValue(ki + 1);
@@ -2004,7 +2230,7 @@ void vtkDICOMDirectory::ProcessDirectory(
   // Find the path to the directory.
   vtkDICOMFilePath path(dirname);
 
-  if (depth == this->ScanDepth)
+  if (depth == this->ScanDepth && !this->IgnoreDicomdir)
   {
     // Build the path to the DICOMDIR file.
     path.PushBack("DICOMDIR");
@@ -2017,6 +2243,8 @@ void vtkDICOMDirectory::ProcessDirectory(
       vtkSmartPointer<vtkDICOMMetaData> meta =
         vtkSmartPointer<vtkDICOMMetaData>::New();
       vtkDICOMParser *parser = vtkDICOMParser::New();
+      parser->SetDefaultCharacterSet(this->DefaultCharacterSet);
+      parser->SetOverrideCharacterSet(this->OverrideCharacterSet);
       parser->AddObserver(
         vtkCommand::ErrorEvent, this, &vtkDICOMDirectory::RelayError);
       parser->SetMetaData(meta);
@@ -2070,10 +2298,10 @@ void vtkDICOMDirectory::ProcessDirectory(
     }
   }
 
-  int n = d.GetNumberOfFiles();
+  int n = d.GetNumberOfEntries();
   for (int i = 0; i < n; i++)
   {
-    const char *fname = d.GetFile(i);
+    const char *fname = d.GetEntry(i);
     if ((fname[0] != '.' || (fname[1] != '\0' &&
          (fname[1] != '.' || fname[2] != '\0'))) &&
         strcmp(fname, "DICOMDIR") != 0)
@@ -2303,6 +2531,45 @@ void vtkDICOMDirectory::RelayError(vtkObject *o, unsigned long e, void *data)
     {
       this->SetErrorCode(parser->GetErrorCode());
       this->SetInternalFileName(parser->GetFileName());
+      if (this->CurrentPatientRecord &&
+          this->CurrentStudyRecord &&
+          this->CurrentSeriesRecord &&
+          this->CurrentImageRecord)
+      {
+        std::stringstream msg;
+        // print some useful information about the file
+        msg << "RelayError: For this entry:\n";
+        msg << "StudyInstanceUID=\""
+            << this->CurrentStudyRecord->Get(DC::StudyInstanceUID).AsString();
+        msg << "\",\nSeriesInstanceUID=\""
+            << this->CurrentSeriesRecord->Get(DC::SeriesInstanceUID).AsString();
+        msg << "\",\nPatientID=\""
+            << this->CurrentPatientRecord->Get(DC::PatientID).AsString();
+        msg << "\", StudyDate=\""
+            << this->CurrentStudyRecord->Get(DC::StudyDate).AsString();
+        msg << "\", StudyTime=\""
+            << this->CurrentStudyRecord->Get(DC::StudyTime).AsString();
+        msg << "\",\nStudyID=\""
+            << this->CurrentStudyRecord->Get(DC::StudyID).AsString();
+        msg << "\", SeriesNumber=\""
+            << this->CurrentSeriesRecord->Get(DC::SeriesNumber).AsString();
+        msg << "\", InstanceNumber=\""
+            << this->CurrentImageRecord->Get(DC::InstanceNumber).AsString();
+        msg << "\"\n";
+        // strip whitespace from the vtkDICOMParser message
+        const char *cp = static_cast<char *>(data);
+        size_t l;
+        for (l = strlen(cp); l > 0; --l)
+        {
+          if (cp[l-1] != '\n' && cp[l-1] != '\r' && cp[l-1] != ' ')
+          {
+            break;
+          }
+        }
+        msg.write(cp, l);
+        vtkErrorMacro(<< msg.str());
+        return;
+      }
     }
     vtkErrorMacro(<< static_cast<char *>(data));
   }

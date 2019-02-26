@@ -17,7 +17,11 @@ if (!(t)) \
   rval |= 1; \
 }
 
+#ifdef VTK_IN_VTK
+int TestDICOMValue(int argc, char *argv[])
+#else
 int main(int argc, char *argv[])
+#endif
 {
   int rval = 0;
   const char *exename = (argc > 0 ? argv[0] : "TestDICOMValue");
@@ -499,25 +503,25 @@ int main(int argc, char *argv[])
   // test sequences
   vtkDICOMSequence su(1);
   vtkDICOMItem item;
-  item.SetAttributeValue(DC::ImageType, "ORIGINAL");
-  item.SetAttributeValue(DC::StudyDate, "20070124-20080124");
-  item.SetAttributeValue(DC::StudyTime, "");
+  item.Set(DC::ImageType, "ORIGINAL");
+  item.Set(DC::StudyDate, "20070124-20080124");
+  item.Set(DC::StudyTime, "");
   su.SetItem(0, item);
   u = su;
   vtkDICOMSequence sv;
   v = sv;
   TestAssert(!v.Matches(u));
   vtkDICOMItem item1;
-  item1.SetAttributeValue(DC::ImageType, "DERIVED\\PRIMARY\\AXIAL");
-  item1.SetAttributeValue(DC::StudyDate, "20070513");
-  item1.SetAttributeValue(DC::StudyTime, "083045.210000");
+  item1.Set(DC::ImageType, "DERIVED\\PRIMARY\\AXIAL");
+  item1.Set(DC::StudyDate, "20070513");
+  item1.Set(DC::StudyTime, "083045.210000");
   sv.AddItem(item1);
   v = sv;
   TestAssert(!v.Matches(u));
   vtkDICOMItem item2;
-  item2.SetAttributeValue(DC::ImageType, "ORIGINAL\\PRIMARY\\AXIAL");
-  item2.SetAttributeValue(DC::StudyDate, "20070513");
-  item2.SetAttributeValue(DC::StudyTime, "083045.210000");
+  item2.Set(DC::ImageType, "ORIGINAL\\PRIMARY\\AXIAL");
+  item2.Set(DC::StudyDate, "20070513");
+  item2.Set(DC::StudyTime, "083045.210000");
   sv.AddItem(item2);
   v = sv;
   TestAssert(v.Matches(u));

@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -14,6 +14,7 @@
 #include "vtkDICOMReader.h"
 #include "vtkDICOMAlgorithm.h"
 #include "vtkDICOMFile.h"
+#include "vtkDICOMFilePath.h"
 #include "vtkDICOMMetaData.h"
 #include "vtkDICOMParser.h"
 #include "vtkDICOMDictionary.h"
@@ -43,6 +44,7 @@
 #include "vtkErrorCode.h"
 #include "vtkSmartPointer.h"
 #include "vtkVersion.h"
+#include "vtkTemplateAliasMacro.h"
 #include "vtkTypeTraits.h"
 
 #if defined(DICOM_USE_DCMTK)
@@ -83,8 +85,12 @@ vtkDICOMReader::vtkDICOMReader()
   this->NeedsYBRToRGB = 0;
   this->AutoRescale = 1;
   this->NeedsRescale = 0;
+  this->FileScalarType = 0;
+  this->OutputScalarType = -1;
   this->RescaleSlope = 1.0;
   this->RescaleIntercept = 0.0;
+  this->DefaultCharacterSet = vtkDICOMCharacterSet::GetGlobalDefault();
+  this->OverrideCharacterSet = vtkDICOMCharacterSet::GetGlobalOverride();
   this->Parser = 0;
   this->Sorter = vtkDICOMSliceSorter::New();
   this->FileIndexArray = vtkIntArray::New();
@@ -102,6 +108,8 @@ vtkDICOMReader::vtkDICOMReader()
   this->TimeDimension = 0;
   this->TimeSpacing = 1.0;
   this->DesiredStackID[0] = '\0';
+  this->OverlayBitfield = 0;
+  this->UpdateOverlayFlag = false;
 
   this->DataScalarType = VTK_SHORT;
   this->NumberOfScalarComponents = 1;
@@ -120,6 +128,9 @@ vtkDICOMReader::vtkDICOMReader()
   DJLSDecoderRegistration::registerCodecs();
   DcmRLEDecoderRegistration::registerCodecs();
 #endif
+
+  // the main image and the overlay are the two outputs
+  this->SetNumberOfOutputPorts(2);
 }
 
 //----------------------------------------------------------------------------
@@ -206,7 +217,7 @@ void vtkDICOMReader::PrintSelf(ostream& os, vtkIndent indent)
 
   os << indent << "DesiredStackID: "
      << (*this->DesiredStackID ? "(empty)" : this->DesiredStackID) << "\n";
-  os << "StackIDs: " << this->StackIDs << "\n";
+  os << indent << "StackIDs: " << this->StackIDs << "\n";
 
   os << indent << "FileIndexArray: " << this->FileIndexArray << "\n";
   os << indent << "FrameIndexArray: " << this->FrameIndexArray << "\n";
@@ -241,6 +252,14 @@ void vtkDICOMReader::PrintSelf(ostream& os, vtkIndent indent)
 
   os << indent << "MemoryRowOrder: "
      << this->GetMemoryRowOrderAsString() << "\n";
+  os << indent << "OutputScalarType: " << this->OutputScalarType << "\n";
+
+  os << indent << "OverlayBitfield: 0b";
+  for (int i = 16; i >= 0; --i)
+  {
+    os << ((this->OverlayBitfield >> i) & 1);
+  }
+  os << "\n";
 }
 
 //----------------------------------------------------------------------------
@@ -261,6 +280,16 @@ void vtkDICOMReader::SetDesiredStackID(const char *stackId)
 }
 
 //----------------------------------------------------------------------------
+void vtkDICOMReader::SetDefaultCharacterSet(vtkDICOMCharacterSet cs)
+{
+  if (this->DefaultCharacterSet != cs)
+  {
+    this->DefaultCharacterSet = cs;
+    this->Modified();
+  }
+}
+
+//----------------------------------------------------------------------------
 namespace {
 
 // This silences error printing when CanReadFile is testing a file.
@@ -269,12 +298,8 @@ class vtkDICOMErrorSilencer : public vtkCommand
 public:
   static vtkDICOMErrorSilencer *New() { return new vtkDICOMErrorSilencer; }
   vtkTypeMacro(vtkDICOMErrorSilencer,vtkCommand);
-#ifdef VTK_OVERRIDE
   void Execute(vtkObject *caller, unsigned long eventId, void *callData)
-    VTK_OVERRIDE;
-#else
-  void Execute(vtkObject *caller, unsigned long eventId, void *callData);
-#endif
+    VTK_DICOM_OVERRIDE;
 protected:
   vtkDICOMErrorSilencer() {};
   vtkDICOMErrorSilencer(const vtkDICOMErrorSilencer& c) : vtkCommand(c) {}
@@ -402,7 +427,7 @@ void vtkDICOMReader::NoSortFiles(vtkIntArray *files, vtkIntArray *frames)
 
   for (int i = 0; i < numFiles; i++)
   {
-    int numFrames = meta->GetAttributeValue(i, DC::NumberOfFrames).AsInt();
+    int numFrames = meta->Get(i, DC::NumberOfFrames).AsInt();
     numFrames = (numFrames > 0 ? numFrames : 1);
 
     for (int j = 0; j < numFrames; j++)
@@ -450,7 +475,7 @@ bool vtkDICOMReader::ValidateStructure(
       usedFiles[fileIndex]++;
 
       int numFrames =
-        meta->GetAttributeValue(fileIndex, DC::NumberOfFrames).AsInt();
+        meta->Get(fileIndex, DC::NumberOfFrames).AsInt();
       numFrames = (numFrames == 0 ? 1 : numFrames);
 
       if (frameIndex < 0 || frameIndex >= numFrames)
@@ -482,7 +507,7 @@ bool vtkDICOMReader::ValidateStructure(
       if (usedFiles[fileIndex] == 0) { continue; }
 
       const char *errorText = 0;
-      vtkDICOMValue v = meta->GetAttributeValue(fileIndex, *tags);
+      vtkDICOMValue v = meta->Get(fileIndex, *tags);
       int i = 1;
       if (v.IsValid())
       {
@@ -535,6 +560,113 @@ bool vtkDICOMReader::ValidateStructure(
   }
 
   return true;
+}
+
+//----------------------------------------------------------------------------
+int vtkDICOMReader::ComputeRescaledScalarType(
+  int scalarType, int bitsStored, int pixelRepresentation)
+{
+  // use BitsStored to get the potential input range
+  unsigned long long l = 1;
+  if (bitsStored > 0)
+  {
+    l <<= bitsStored - 1;
+  }
+  double pMin = 0;
+  double pMax = 2.0*l - 1.0;
+  if (pixelRepresentation)
+  {
+    pMin = -1.0*l;
+    pMax = l - 1.0;
+  }
+
+  // loop through all images to get the rescaled range
+  double vMin = VTK_DOUBLE_MAX;
+  double vMax = VTK_DOUBLE_MIN;
+
+  bool needsRescale = false;
+  bool outputFloat = (scalarType == VTK_FLOAT || scalarType == VTK_DOUBLE);
+
+  vtkIdType numSlices = this->FileIndexArray->GetNumberOfTuples();
+  for (vtkIdType iSlice = 0; iSlice < numSlices; iSlice++)
+  {
+    int numComp = this->FileIndexArray->GetNumberOfComponents();
+    for (int iComp = 0; iComp < numComp; iComp++)
+    {
+      int iFile = this->FileIndexArray->GetComponent(iSlice, iComp);
+      int iFrame = this->FrameIndexArray->GetComponent(iSlice, iComp);
+
+      double m = this->MetaData->Get(
+        iFile, iFrame, DC::RescaleSlope).AsDouble();
+      double b = this->MetaData->Get(
+        iFile, iFrame, DC::RescaleIntercept).AsDouble();
+
+      // sanity check
+      if (m == 0.0)
+      {
+        m = 1.0;
+      }
+
+      // check if rescale will be needed
+      if (m != 1.0 || b != 0.0)
+      {
+        needsRescale = true;
+
+        // check if slope and intercept are integers
+        if (m != floor(m) || b != floor(b))
+        {
+          outputFloat = true;
+        }
+      }
+
+      // compute the min, max output values for one image
+      double iMin = pMin*m + b;
+      double iMax = pMax*m + b;
+
+      // modify the global min, max output values
+      vMin = (iMin < vMin ? iMin : vMin);
+      vMax = (iMax > vMax ? iMax : vMax);
+    }
+  }
+
+  // check if the data type has to be changed
+  if (!outputFloat &&
+      (vMin < vtkDataArray::GetDataTypeMin(scalarType) ||
+       vMax > vtkDataArray::GetDataTypeMax(scalarType)))
+  {
+    int byteSize = vtkDataArray::GetDataTypeSize(scalarType);
+    if (byteSize <= 2)
+    {
+      scalarType = (vMin < 0.0 ? VTK_SHORT : VTK_UNSIGNED_SHORT);
+    }
+    else if (byteSize <= 4)
+    {
+      scalarType = (vMin < 0.0 ? VTK_INT : VTK_UNSIGNED_INT);
+    }
+    else
+    {
+      scalarType = (vMin < 0.0 ? VTK_TYPE_INT64 : VTK_TYPE_UINT64);
+    }
+  }
+
+  if (outputFloat &&
+      scalarType != VTK_FLOAT &&
+      scalarType != VTK_DOUBLE)
+  {
+    // use float if data is 24 bits or less
+    if (bitsStored <= 24)
+    {
+      scalarType = VTK_FLOAT;
+    }
+    else
+    {
+      scalarType = VTK_DOUBLE;
+    }
+  }
+
+  this->NeedsRescale = needsRescale;
+
+  return scalarType;
 }
 
 //----------------------------------------------------------------------------
@@ -597,6 +729,8 @@ int vtkDICOMReader::RequestInformation(
 
   // Parser reads just the meta data, not the pixel data.
   this->Parser = vtkDICOMParser::New();
+  this->Parser->SetDefaultCharacterSet(this->DefaultCharacterSet);
+  this->Parser->SetOverrideCharacterSet(this->OverrideCharacterSet);
   this->Parser->SetMetaData(this->MetaData);
   this->Parser->AddObserver(
     vtkCommand::ErrorEvent, this, &vtkDICOMReader::RelayError);
@@ -660,12 +794,9 @@ int vtkDICOMReader::RequestInformation(
   int frameIndex = this->FrameIndexArray->GetComponent(0, 0);
 
   // image dimensions
-  int columns = this->MetaData->GetAttributeValue(
-    fileIndex, DC::Columns).AsInt();
-  int rows = this->MetaData->GetAttributeValue(
-    fileIndex, DC::Rows).AsInt();
-  int slices = static_cast<int>(
-    this->FileIndexArray->GetNumberOfTuples());
+  int columns = this->MetaData->Get(fileIndex, DC::Columns).AsInt();
+  int rows = this->MetaData->Get(fileIndex, DC::Rows).AsInt();
+  int slices = static_cast<int>(this->FileIndexArray->GetNumberOfTuples());
 
   int extent[6];
   extent[0] = 0;
@@ -699,8 +830,8 @@ int vtkDICOMReader::RequestInformation(
 
   // Set spacing from PixelAspectRatio
   double ratio = 1.0;
-  vtkDICOMValue pixelAspectRatio = this->MetaData->GetAttributeValue(
-    fileIndex, frameIndex, DC::PixelAspectRatio);
+  vtkDICOMValue pixelAspectRatio =
+    this->MetaData->Get(fileIndex, frameIndex, DC::PixelAspectRatio);
   if (pixelAspectRatio.GetNumberOfValues() == 2)
   {
     // use double, even though data is stored as integer strings
@@ -723,8 +854,8 @@ int vtkDICOMReader::RequestInformation(
   }
 
   // Set spacing from PixelSpacing
-  vtkDICOMValue pixelSpacing = this->MetaData->GetAttributeValue(
-    fileIndex, frameIndex, DC::PixelSpacing);
+  vtkDICOMValue pixelSpacing =
+    this->MetaData->Get(fileIndex, frameIndex, DC::PixelSpacing);
   if (pixelSpacing.GetNumberOfValues() == 2)
   {
     double spacing[2];
@@ -742,14 +873,19 @@ int vtkDICOMReader::RequestInformation(
   this->DataOrigin[2] = 0.0;
 
   // get information related to the data type
-  int bitsAllocated = this->MetaData->GetAttributeValue(
-    fileIndex, DC::BitsAllocated).AsInt();
-  int pixelRepresentation = this->MetaData->GetAttributeValue(
-    fileIndex, DC::PixelRepresentation).AsInt();
-  int numComponents = this->MetaData->GetAttributeValue(
-    fileIndex, DC::SamplesPerPixel).AsInt();
-  int planarConfiguration = this->MetaData->GetAttributeValue(
-    fileIndex, DC::PlanarConfiguration).AsInt();
+  int bitsAllocated =
+    this->MetaData->Get(fileIndex, DC::BitsAllocated).AsInt();
+  int pixelRepresentation =
+    this->MetaData->Get(fileIndex, DC::PixelRepresentation).AsInt();
+  int numComponents =
+    this->MetaData->Get(fileIndex, DC::SamplesPerPixel).AsInt();
+  int planarConfiguration =
+    this->MetaData->Get(fileIndex, DC::PlanarConfiguration).AsInt();
+  int bitsStored = this->MetaData->Get(fileIndex, DC::BitsStored).AsInt();
+  if (bitsStored > bitsAllocated || bitsStored <= 0)
+  {
+    bitsStored = bitsAllocated;
+  }
 
   // datatype
   int scalarType = 0;
@@ -764,8 +900,7 @@ int vtkDICOMReader::RequestInformation(
   }
   else if (bitsAllocated <= 32)
   {
-    if (this->MetaData->GetAttributeValue(
-          fileIndex, DC::FloatPixelData).IsValid())
+    if (this->MetaData->Get(fileIndex, DC::FloatPixelData).IsValid())
     {
       scalarType = VTK_FLOAT;
     }
@@ -776,14 +911,69 @@ int vtkDICOMReader::RequestInformation(
   }
   else if (bitsAllocated <= 64)
   {
-    if (this->MetaData->GetAttributeValue(
-          fileIndex, DC::DoubleFloatPixelData).IsValid())
+    if (this->MetaData->Get(fileIndex, DC::DoubleFloatPixelData).IsValid())
     {
       scalarType = VTK_DOUBLE;
     }
     else
     {
       scalarType = (pixelRepresentation ? VTK_TYPE_INT64: VTK_TYPE_UINT64);
+    }
+  }
+
+  this->RescaleSlope = 1.0;
+  this->RescaleIntercept = 0.0;
+  this->NeedsRescale = false;
+  this->FileScalarType = scalarType;
+
+  const vtkDICOMValue& slopeValue =
+    this->MetaData->Get(fileIndex, frameIndex, DC::RescaleSlope);
+  const vtkDICOMValue& interceptValue =
+    this->MetaData->Get(fileIndex, frameIndex, DC::RescaleIntercept);
+
+  if (slopeValue.IsValid() && interceptValue.IsValid())
+  {
+    if (this->AutoRescale)
+    {
+      // set NeedsRescale if any rescaling will be necessary,
+      // and provide the new output type that will be needed
+      scalarType = this->ComputeRescaledScalarType(
+        scalarType, bitsStored, pixelRepresentation);
+    }
+    else
+    {
+      this->RescaleSlope = slopeValue.AsDouble();
+      this->RescaleIntercept = interceptValue.AsDouble();
+      if (this->RescaleSlope == 0.0)
+      {
+        this->RescaleSlope = 1.0;
+      }
+    }
+  }
+
+  // apply requested scalar type
+  if (this->OutputScalarType != -1)
+  {
+    switch (this->OutputScalarType)
+    {
+      case VTK_SIGNED_CHAR:
+      case VTK_UNSIGNED_CHAR:
+      case VTK_SHORT:
+      case VTK_UNSIGNED_SHORT:
+      case VTK_INT:
+      case VTK_UNSIGNED_INT:
+      case VTK_FLOAT:
+      case VTK_DOUBLE:
+        scalarType = this->OutputScalarType;
+        if (scalarType != this->FileScalarType)
+        {
+          this->NeedsRescale = true;
+        }
+        break;
+      default:
+        vtkWarningMacro("Illegal OutputScalarType: "
+                        << this->OutputScalarType);
+        break;
     }
   }
 
@@ -811,8 +1001,8 @@ int vtkDICOMReader::RequestInformation(
   // See DICOM Ch. 3 Appendix C 7.6.3.1.2 for equations
 
   // endianness
-  std::string transferSyntax = this->MetaData->GetAttributeValue(
-    fileIndex, DC::TransferSyntaxUID).AsString();
+  std::string transferSyntax =
+    this->MetaData->Get(fileIndex, DC::TransferSyntaxUID).AsString();
 
   bool bigEndian = (transferSyntax == "1.2.840.10008.1.2.2" ||
                     transferSyntax == "1.2.840.113619.5.2");
@@ -822,54 +1012,6 @@ int vtkDICOMReader::RequestInformation(
 #else
   this->SwapBytes = bigEndian;
 #endif
-
-  // for CT and PET the rescale information might vary from file to file,
-  // in which case the data will be rescaled while being read if the
-  // AutoRescale option is set.
-  this->RescaleSlope = 1.0;
-  this->RescaleIntercept = 0.0;
-  this->NeedsRescale = false;
-
-  if (this->MetaData->GetAttributeValue(
-        fileIndex, frameIndex, DC::RescaleSlope).IsValid() &&
-      this->MetaData->GetAttributeValue(
-        fileIndex, frameIndex, DC::RescaleIntercept).IsValid())
-  {
-    bool mismatch = false;
-    double mMax = VTK_DOUBLE_MIN;
-    double bMax = VTK_DOUBLE_MIN;
-
-    vtkIdType numSlices = this->FileIndexArray->GetNumberOfTuples();
-    for (vtkIdType iSlice = 0; iSlice < numSlices; iSlice++)
-    {
-      int numComp = this->FileIndexArray->GetNumberOfComponents();
-      for (int iComp = 0; iComp < numComp; iComp++)
-      {
-        int iFile = this->FileIndexArray->GetComponent(iSlice, iComp);
-        int iFrame = this->FrameIndexArray->GetComponent(iSlice, iComp);
-
-        double m = this->MetaData->GetAttributeValue(
-          iFile, iFrame, DC::RescaleSlope).AsDouble();
-        double b = this->MetaData->GetAttributeValue(
-          iFile, iFrame, DC::RescaleIntercept).AsDouble();
-        if ((iSlice != 0 || iComp != 0) && (m != mMax || b != bMax))
-        {
-          mismatch = true;
-        }
-        if (m > mMax)
-        {
-          mMax = m;
-        }
-        if (b > bMax)
-        {
-          bMax = b;
-        }
-      }
-    }
-    this->NeedsRescale = (mismatch && this->AutoRescale);
-    this->RescaleSlope = mMax;
-    this->RescaleIntercept = bMax;
-  }
 
   // === Image Orientation in DICOM files ===
   //
@@ -891,10 +1033,10 @@ int vtkDICOMReader::RequestInformation(
   {
     int iFile = this->FileIndexArray->GetComponent(iSlice, 0);
     int iFrame = this->FrameIndexArray->GetComponent(iSlice, 0);
-    vtkDICOMValue pv = this->MetaData->GetAttributeValue(
-      iFile, iFrame, DC::ImagePositionPatient);
-    vtkDICOMValue ov = this->MetaData->GetAttributeValue(
-      fileIndex, frameIndex, DC::ImageOrientationPatient);
+    vtkDICOMValue pv =
+       this->MetaData->Get(iFile, iFrame, DC::ImagePositionPatient);
+    vtkDICOMValue ov =
+      this->MetaData->Get(fileIndex, frameIndex, DC::ImageOrientationPatient);
     if (pv.GetNumberOfValues() == 3 && ov.GetNumberOfValues() == 6)
     {
       pv.GetValues(point, 3);
@@ -919,9 +1061,15 @@ int vtkDICOMReader::RequestInformation(
         point[1] = point[1] + orient[4]*yspacing*(rows - 1);
         point[2] = point[2] + orient[5]*yspacing*(rows - 1);
 
+        // switch from "top down" to "bottom up"
         orient[3] = -orient[3];
         orient[4] = -orient[4];
         orient[5] = -orient[5];
+
+        // fix normal (cross product of orientation vectors)
+        normal[0] = -normal[0];
+        normal[1] = -normal[1];
+        normal[2] = -normal[2];
       }
 
       size_t ip = points.size();
@@ -1021,33 +1169,120 @@ int vtkDICOMReader::RequestInformation(
   outInfo->Set(vtkDICOMAlgorithm::PATIENT_MATRIX(),
                *this->PatientMatrix->Element, 16);
 
+  // Check for OverlayData (60xx,3000)
+  this->OverlayBitfield = 0;
+  for (unsigned short i = 0; i < 16; i++)
+  {
+    unsigned short g = 0x6000 + 2*i;
+    if (this->MetaData->Has(vtkDICOMTag(g, 0x3000)))
+    {
+      this->OverlayBitfield |= (1 << i);
+    }
+  }
+
+  // Set the information for the overlay
+  vtkInformation* oInfo = outputVector->GetInformationObject(1);
+  oInfo->Set(vtkStreamingDemandDrivenPipeline::WHOLE_EXTENT(), extent, 6);
+
+  oInfo->Set(vtkDataObject::SPACING(), this->DataSpacing, 3);
+  oInfo->Set(vtkDataObject::ORIGIN(),  this->DataOrigin, 3);
+
+  int overlayType =
+    (this->OverlayBitfield <= 255 ? VTK_UNSIGNED_CHAR : VTK_UNSIGNED_SHORT);
+  int overlayComponents = this->FileIndexArray->GetNumberOfComponents();
+
+  vtkDataObject::SetPointDataActiveScalarInfo(
+    oInfo, overlayType, overlayComponents);
+
+  oInfo->Set(vtkDICOMAlgorithm::PATIENT_MATRIX(),
+             *this->PatientMatrix->Element, 16);
+
   return 1;
 }
 
 namespace {
 
 //----------------------------------------------------------------------------
-// this rescales a series of data values
+// templated bit masking functions
+
 template<class T>
-void vtkDICOMReaderRescaleBuffer(T *p, double m, double b, size_t bytecount)
+void vtkDICOMMaskBits(T *ptr, size_t n, int bits, int pixelRepr)
 {
-  size_t n = bytecount/sizeof(T);
-  if (n > 0 && (m != 1.0 || b != 0.0))
+  if (n > 0)
   {
-    double minval = vtkTypeTraits<T>::Min();
-    double maxval = vtkTypeTraits<T>::Max();
+    T bitmask = (1 << bits) - 1;
+    if (pixelRepr == 0)
+    {
+      // unsigned: simply apply mask
+      do
+      {
+        *ptr &= bitmask;
+        ptr++;
+      }
+      while (--n);
+    }
+    else
+    {
+      // signed: apply mask and sign extend
+      T highbit = (1 << (bits - 1));
+      do
+      {
+        *ptr = ((*ptr & bitmask) ^ highbit) - highbit;
+        ptr++;
+      }
+      while (--n);
+    }
+  }
+}
+
+//----------------------------------------------------------------------------
+// templated conversion functions, for converting to and from floating point
+
+template<class T1, class T2>
+void vtkDICOMConvertBuffer(const T1 *ip, T2 *op, int im, int om, size_t n)
+{
+  if (n > 0)
+  {
+    T1 minval = vtkTypeTraits<T2>::Min();
+    T1 maxval = vtkTypeTraits<T2>::Max();
     do
     {
-      double val = (*p)*m + b;
-      if (val < minval)
-      {
-        val = minval;
-      }
-      if (val > maxval)
-      {
-        val = maxval;
-      }
-      *p++ = static_cast<T>(vtkMath::Round(val));
+      T1 v = *ip;
+      v = (v > minval ? v : minval);
+      v = (v < maxval ? v : maxval);
+      *op = static_cast<T2>(v);
+      ip += im;
+      op += om;
+    }
+    while (--n);
+  }
+}
+
+template<class T>
+void vtkDICOMConvertBuffer(const T *ip, float *op, int im, int om, size_t n)
+{
+  if (n > 0)
+  {
+    do
+    {
+      *op = *ip;
+      ip += im;
+      op += om;
+    }
+    while (--n);
+  }
+}
+
+template<class T>
+void vtkDICOMConvertBuffer(const T *ip, double *op, int im, int om, size_t n)
+{
+  if (n > 0)
+  {
+    do
+    {
+      *op = *ip;
+      ip += im;
+      op += om;
     }
     while (--n);
   }
@@ -1057,62 +1292,61 @@ void vtkDICOMReaderRescaleBuffer(T *p, double m, double b, size_t bytecount)
 
 //----------------------------------------------------------------------------
 void vtkDICOMReader::RescaleBuffer(
-  int fileIdx, int frameIdx, void *buffer, vtkIdType bufferSize)
+  int fileIdx, int frameIdx, int fileType, int outputType,
+  int fileNumComponents, int numComponents,
+  void *fileBuffer, void *outputBuffer, vtkIdType bufferSize)
 {
   vtkDICOMMetaData *meta = this->MetaData;
-  double m = meta->GetAttributeValue(
-    fileIdx, frameIdx, DC::RescaleSlope).AsDouble();
-  double b = meta->GetAttributeValue(
-    fileIdx, frameIdx, DC::RescaleIntercept).AsDouble();
-  double m0 = this->RescaleSlope;
-  double b0 = this->RescaleIntercept;
+  double m = meta->Get(fileIdx, frameIdx, DC::RescaleSlope).AsDouble();
+  double b = meta->Get(fileIdx, frameIdx, DC::RescaleIntercept).AsDouble();
 
-  // scale down to match the global slope and intercept
-  b = (b - b0)/m0;
-  m = m/m0;
-
-  int bitsAllocated = meta->GetAttributeValue(
-    fileIdx, DC::BitsAllocated).AsInt();
-  int pixelRep = meta->GetAttributeValue(
-    fileIdx, DC::PixelRepresentation).AsInt();
-
-  if (bitsAllocated <= 8)
+  if (m == 0.0)
   {
-    if (pixelRep == 0)
-    {
-      vtkDICOMReaderRescaleBuffer(
-        static_cast<unsigned char *>(buffer), m, b, bufferSize);
-    }
-    else
-    {
-      vtkDICOMReaderRescaleBuffer(
-        static_cast<signed char *>(buffer), m, b, bufferSize);
-    }
+    m = 1.0;
   }
-  else if (bitsAllocated <= 16)
+
+  int inSize = vtkDataArray::GetDataTypeSize(fileType);
+  int outSize = vtkDataArray::GetDataTypeSize(outputType);
+  size_t numPixels = bufferSize/(inSize*fileNumComponents);
+
+  for (int c = 0; c < fileNumComponents; c++)
   {
-    if (pixelRep == 0)
+    void *filePtr = static_cast<char *>(fileBuffer) + inSize*c;
+    void *outputPtr = static_cast<char *>(outputBuffer) + outSize*c;
+    size_t n = numPixels;
+
+    while (n > 0)
     {
-      vtkDICOMReaderRescaleBuffer(
-        static_cast<unsigned short *>(buffer), m, b, bufferSize);
-    }
-    else
-    {
-      vtkDICOMReaderRescaleBuffer(
-        static_cast<short *>(buffer), m, b, bufferSize);
-    }
-  }
-  else if (bitsAllocated <= 32)
-  {
-    if (pixelRep == 0)
-    {
-      vtkDICOMReaderRescaleBuffer(
-        static_cast<unsigned int *>(buffer), m, b, bufferSize);
-    }
-    else
-    {
-      vtkDICOMReaderRescaleBuffer(
-        static_cast<int *>(buffer), m, b, bufferSize);
+      double temp[64];
+      size_t nn = (n < 64 ? n : 64);
+      n -= nn;
+
+      switch (fileType)
+      {
+        vtkTemplateAliasMacro(
+          vtkDICOMConvertBuffer(
+            static_cast<const VTK_TT *>(filePtr), temp,
+            fileNumComponents, 1, nn));
+      }
+
+      if (this->AutoRescale)
+      {
+        for (size_t ii = 0; ii < nn; ii++)
+        {
+          temp[ii] = temp[ii]*m + b;
+        }
+      }
+
+      switch (outputType)
+      {
+        vtkTemplateAliasMacro(
+          vtkDICOMConvertBuffer(
+            temp, static_cast<VTK_TT *>(outputPtr),
+            1, numComponents, nn));
+      }
+
+      filePtr = static_cast<char *>(filePtr) + inSize*fileNumComponents*nn;
+      outputPtr = static_cast<char *>(outputPtr) + outSize*numComponents*nn;
     }
   }
 }
@@ -1142,10 +1376,10 @@ void vtkDICOMReader::YBRToRGB(
 
   // get information from the meta data
   vtkDICOMMetaData *meta = this->MetaData;
-  const vtkDICOMValue& photometric = meta->GetAttributeValue(
-    fileIdx, DC::PhotometricInterpretation);
-  const vtkDICOMValue& transferSyntax = meta->GetAttributeValue(
-    fileIdx, DC::TransferSyntaxUID);
+  const vtkDICOMValue& photometric =
+    meta->Get(fileIdx, DC::PhotometricInterpretation);
+  const vtkDICOMValue& transferSyntax =
+    meta->Get(fileIdx, DC::TransferSyntaxUID);
 
   // catch JPEG baseline images with incorrect PhotometricInterpretation
   if (transferSyntax.Matches("1.2.840.10008.1.2.4.50") ||
@@ -1198,6 +1432,80 @@ void vtkDICOMReader::YBRToRGB(
       cp += 3;
     }
     while (--n);
+  }
+}
+
+//----------------------------------------------------------------------------
+void vtkDICOMReader::UnpackYBR422(
+  const void *filePtr, void *buffer, vtkIdType bufferSize, vtkIdType rowlen)
+{
+  const unsigned char *readPtr =
+    static_cast<const unsigned char *>(filePtr);
+  unsigned char *writePtr =
+    static_cast<unsigned char *>(buffer);
+
+  vtkIdType n = bufferSize/3;
+  for (vtkIdType j = n; j > 0; j -= rowlen)
+  {
+    rowlen = std::min(rowlen, j);
+    for (int i = rowlen; i > 0; i -= 2)
+    {
+      // read one macropixel
+      unsigned char y1 = readPtr[0];
+      unsigned char y2 = readPtr[1];
+      unsigned char b = readPtr[2];
+      unsigned char r = readPtr[3];
+      readPtr += 4;
+
+      // write an even pixel
+      writePtr[0] = y1;
+      writePtr[1] = b;
+      writePtr[2] = r;
+      writePtr += 3;
+
+      // break early if rowlen is odd
+      if (i < 2)
+      {
+        break;
+      }
+
+      // filter color for odd pixels
+      if (i > 2)
+      {
+        b = (b + readPtr[2])/2;
+        r = (r + readPtr[3])/2;
+      }
+
+      // write an odd pixel
+      writePtr[0] = y2;
+      writePtr[1] = b;
+      writePtr[2] = r;
+      writePtr += 3;
+    }
+  }
+}
+
+//----------------------------------------------------------------------------
+void vtkDICOMReader::MaskBits(
+  void *buffer, vtkIdType bufferSize, int scalarSize,
+  int bitsStored, int pixelRepresentation)
+{
+  size_t n = bufferSize/scalarSize;
+
+  if (scalarSize == 1)
+  {
+    vtkDICOMMaskBits(static_cast<unsigned char *>(buffer), n,
+                     bitsStored, pixelRepresentation);
+  }
+  else if (scalarSize == 2)
+  {
+    vtkDICOMMaskBits(static_cast<unsigned short *>(buffer), n,
+                     bitsStored, pixelRepresentation);
+  }
+  else if (scalarSize == 4)
+  {
+    vtkDICOMMaskBits(static_cast<unsigned int *>(buffer), n,
+                     bitsStored, pixelRepresentation);
   }
 }
 
@@ -1261,6 +1569,57 @@ void vtkDICOMReader::UnpackBits(
 }
 
 //----------------------------------------------------------------------------
+void vtkDICOMReader::UnpackOverlay(
+  const void *filePtr, vtkIdType bitskip, vtkIdType count,
+  void *buffer, vtkIdType incr, int bit)
+{
+  const unsigned char *readPtr =
+    static_cast<const unsigned char *>(filePtr);
+  unsigned char *writePtr =
+    static_cast<unsigned char *>(buffer);
+
+  readPtr += bitskip/8;
+  int r = (bitskip % 8);
+  if (r > 0)
+  {
+    unsigned char a = *readPtr;
+    a >>= r;
+    for (int i = r; i < 8; i++)
+    {
+      *writePtr |= (a & 1) << bit;
+      a >>= 1;
+      writePtr += incr;
+    }
+    count -= (8 - r);
+    readPtr++;
+  }
+
+  for (vtkIdType n = count/8; n > 0; n--)
+  {
+    unsigned char a = *readPtr;
+    for (int i = 0; i < 8; i++)
+    {
+      *writePtr |= (a & 1) << bit;
+      a >>= 1;
+      writePtr += incr;
+    }
+    readPtr++;
+  }
+  count = (count % 8);
+
+  if (count > 0)
+  {
+    unsigned char a = *readPtr;
+    for (int i = 0; i < count; i++)
+    {
+      *writePtr |= (a & 1) << bit;
+      a >>= 1;
+      writePtr += incr;
+    }
+  }
+}
+
+//----------------------------------------------------------------------------
 bool vtkDICOMReader::ReadFileNative(
   const char *filename, int fileIdx,
   unsigned char *buffer, vtkIdType bufferSize)
@@ -1288,8 +1647,8 @@ bool vtkDICOMReader::ReadFileNative(
     return false;
   }
 
-  std::string transferSyntax = this->MetaData->GetAttributeValue(
-    fileIdx, DC::TransferSyntaxUID).AsString();
+  std::string transferSyntax =
+    this->MetaData->Get(fileIdx, DC::TransferSyntaxUID).AsString();
 
   // this will set endiancheck.s to 1 on big endian architectures
   union { char c[2]; short s; } endianCheck = { { 0, 1 } };
@@ -1297,8 +1656,8 @@ bool vtkDICOMReader::ReadFileNative(
   bool fileBigEndian = (transferSyntax == "1.2.840.10008.1.2.2" ||
                         transferSyntax == "1.2.840.113619.5.2");
 
-  int bitsAllocated = this->MetaData->GetAttributeValue(
-    fileIdx, DC::BitsAllocated).AsInt();
+  int bitsAllocated =
+    this->MetaData->Get(fileIdx, DC::BitsAllocated).AsInt();
 
   size_t readSize = bufferSize;
   size_t resultSize = 0;
@@ -1306,8 +1665,8 @@ bool vtkDICOMReader::ReadFileNative(
   {
     vtkDICOMImageCodec codec(transferSyntax);
 
-    unsigned int numFrames = this->MetaData->GetAttributeValue(
-      fileIdx, DC::NumberOfFrames).AsUnsignedInt();
+    unsigned int numFrames =
+      this->MetaData->Get(fileIdx, DC::NumberOfFrames).AsUnsignedInt();
     numFrames = (numFrames == 0 ? 1 : numFrames);
 
     // assume the remainder of the file is all pixel data
@@ -1377,6 +1736,18 @@ bool vtkDICOMReader::ReadFileNative(
 
     vtkDICOMReader::UnpackBits(filePtr, buffer, bufferSize, bitsAllocated);
   }
+  else if (this->MetaData->GetAttributeValue(fileIdx,
+             DC::PhotometricInterpretation).Matches("YBR_*_422"))
+  {
+    // the data uses 422 color compression
+    vtkIdType rowlen = this->MetaData->Get(fileIdx, DC::Columns).AsInt();
+    vtkIdType nrows = bufferSize/(rowlen*3);
+    readSize = (rowlen + 1)/2*nrows*4; // make rowlen even for reading
+    unsigned char *filePtr = buffer + (bufferSize - readSize);
+    resultSize = infile.Read(filePtr, readSize);
+
+    vtkDICOMReader::UnpackYBR422(filePtr, buffer, bufferSize, rowlen);
+  }
   else
   {
     resultSize = infile.Read(buffer, readSize);
@@ -1415,6 +1786,12 @@ bool vtkDICOMReader::ReadFileDelegated(
   // For JPEG, DCMTK will do the YBR to RGB
   this->NeedsYBRToRGB = false;
 
+#ifdef _WIN32
+  // Convert utf8 filename to local character set for dcmtk
+  vtkDICOMFilePath filePath(filename);
+  filename = filePath.Local();
+#endif
+
   DcmFileFormat *fileformat = new DcmFileFormat();
   fileformat->loadFile(filename);
   OFCondition status = fileformat->getDataset()->chooseRepresentation(
@@ -1434,8 +1811,8 @@ bool vtkDICOMReader::ReadFileDelegated(
     DCM_PixelData, pixelData, &count, OFTrue);
   vtkIdType imageSize = static_cast<vtkIdType>(count);
 
-  int bitsAllocated = this->MetaData->GetAttributeValue(
-    fileIdx, DC::BitsAllocated).AsInt();
+  int bitsAllocated =
+    this->MetaData->Get(fileIdx, DC::BitsAllocated).AsInt();
 
   if (bitsAllocated == 12 && imageSize >= bufferSize/2 + (bufferSize+3)/4)
   {
@@ -1464,6 +1841,12 @@ bool vtkDICOMReader::ReadFileDelegated(
 #elif defined(DICOM_USE_GDCM)
 
   (void)fileIdx;
+
+#ifdef _WIN32
+  // Convert utf8 filename to local character set for gdcm
+  vtkDICOMFilePath filePath(filename);
+  filename = filePath.Local();
+#endif
 
   gdcm::ImageReader reader;
   reader.SetFileName(filename);
@@ -1506,8 +1889,8 @@ bool vtkDICOMReader::ReadOneFile(
   const char *filename, int fileIdx,
   unsigned char *buffer, vtkIdType bufferSize)
 {
-  std::string transferSyntax = this->MetaData->GetAttributeValue(
-    fileIdx, DC::TransferSyntaxUID).AsString();
+  std::string transferSyntax =
+    this->MetaData->Get(fileIdx, DC::TransferSyntaxUID).AsString();
 
   if (transferSyntax == "1.2.840.10008.1.2"   ||  // Implicit LE
       transferSyntax == "1.2.840.10008.1.20"  ||  // Papyrus Implicit LE
@@ -1521,6 +1904,44 @@ bool vtkDICOMReader::ReadOneFile(
   }
 
   return this->ReadFileDelegated(filename, fileIdx, buffer, bufferSize);
+}
+
+//----------------------------------------------------------------------------
+void vtkDICOMReader::Update()
+{
+  // if user didn't specify a port, also update the overlay if present
+  this->UpdateOverlayFlag = true;
+  this->Superclass::Update();
+  this->UpdateOverlayFlag = false;
+}
+
+//----------------------------------------------------------------------------
+int vtkDICOMReader::ProcessRequest(
+  vtkInformation* request,
+  vtkInformationVector** inputVector,
+  vtkInformationVector* outputVector)
+{
+  if (request->Has(vtkDemandDrivenPipeline::REQUEST_DATA_NOT_GENERATED()))
+  {
+    // which output port did the request come from
+    int outputPort =
+      request->Get(vtkDemandDrivenPipeline::FROM_OUTPUT_PORT());
+    int n = outputVector->GetNumberOfInformationObjects();
+    // set DATA_NOT_GENERATED on other ports, otherwise executive will
+    // initialize them before RequestData is called
+    for (int i = 0; i < n; i++)
+    {
+      if (i != outputPort &&
+          !(this->UpdateOverlayFlag && this->OverlayBitfield &&
+            outputPort == 1))
+      {
+        vtkInformation *outputInfo = outputVector->GetInformationObject(i);
+        outputInfo->Set(vtkDemandDrivenPipeline::DATA_NOT_GENERATED(), 1);
+      }
+    }
+  }
+
+  return this->Superclass::ProcessRequest(request, inputVector, outputVector);
 }
 
 //----------------------------------------------------------------------------
@@ -1539,12 +1960,31 @@ int vtkDICOMReader::RequestData(
   int outputPort =
     request->Get(vtkDemandDrivenPipeline::FROM_OUTPUT_PORT());
 
-  // for now, this reader has only one output
+  // check for the overlay output
+  if (outputPort == 1 || (this->UpdateOverlayFlag && this->OverlayBitfield))
+  {
+    vtkInformation* outInfo = outputVector->GetInformationObject(1);
+    int uExtent[6];
+    outInfo->Get(vtkStreamingDemandDrivenPipeline::UPDATE_EXTENT(), uExtent);
+    // get the overlay data object, allocate memory
+    vtkImageData *data =
+      static_cast<vtkImageData *>(outInfo->Get(vtkDataObject::DATA_OBJECT()));
+#if VTK_MAJOR_VERSION >= 6
+    this->AllocateOutputData(data, outInfo, uExtent);
+#else
+    data->SetExtent(uExtent);
+    data->AllocateScalars();
+#endif
+    this->ReadOverlays(data);
+  }
+
+  // if output port 0 was not requested, then return
   if (outputPort > 0)
   {
     return true;
   }
 
+  // do the main output
   vtkInformation* outInfo = outputVector->GetInformationObject(0);
 
   int extent[6];
@@ -1574,8 +2014,7 @@ int vtkDICOMReader::RequestData(
       }
       if (iter == files.end())
       {
-        int n = this->MetaData->GetAttributeValue(
-          fileIdx, DC::NumberOfFrames).AsInt();
+        int n = this->MetaData->Get(fileIdx, DC::NumberOfFrames).AsInt();
         n = (n > 0 ? n : 1);
         files.push_back(vtkDICOMReaderFileInfo(fileIdx, n));
         iter = files.end();
@@ -1591,7 +2030,8 @@ int vtkDICOMReader::RequestData(
 #if VTK_MAJOR_VERSION >= 6
   this->AllocateOutputData(data, outInfo, extent);
 #else
-  this->AllocateOutputData(data, extent);
+  data->SetExtent(extent);
+  data->AllocateScalars();
 #endif
 
   // label the scalars as "PixelData"
@@ -1606,6 +2046,7 @@ int vtkDICOMReader::RequestData(
   unsigned char *dataPtr =
     static_cast<unsigned char *>(data->GetScalarPointer());
 
+  int scalarType = data->GetScalarType();
   int scalarSize = data->GetScalarSize();
   int numComponents = data->GetNumberOfScalarComponents();
   int numFileComponents = this->NumberOfPackedComponents;
@@ -1614,7 +2055,9 @@ int vtkDICOMReader::RequestData(
   vtkIdType pixelSize = numComponents*scalarSize;
   vtkIdType rowSize = pixelSize*(extent[1] - extent[0] + 1);
   vtkIdType sliceSize = rowSize*(extent[3] - extent[2] + 1);
-  vtkIdType filePixelSize = numFileComponents*scalarSize;
+
+  int fileScalarSize = vtkDataArray::GetDataTypeSize(this->FileScalarType);
+  vtkIdType filePixelSize = numFileComponents*fileScalarSize;
   vtkIdType fileRowSize = filePixelSize*(extent[1] - extent[0] + 1);
   vtkIdType filePlaneSize = fileRowSize*(extent[3] - extent[2] + 1);
   vtkIdType fileFrameSize = filePlaneSize*numPlanes;
@@ -1622,7 +2065,7 @@ int vtkDICOMReader::RequestData(
   this->InvokeEvent(vtkCommand::StartEvent);
 
   bool flipImage = (this->MemoryRowOrder == vtkDICOMReader::BottomUp);
-  bool planarToPacked = (filePixelSize != pixelSize);
+  bool planarToPacked = (numFileComponents != numComponents);
   unsigned char *rowBuffer = 0;
   if (flipImage)
   {
@@ -1636,29 +2079,36 @@ int vtkDICOMReader::RequestData(
   {
     if (this->AbortExecute) { break; }
 
+    // get the index for this file
+    int fileIdx = files[idx].FileIndex;
+    this->ComputeInternalFileName(fileIdx);
+    this->SetProgressText(this->InternalFileName);
     this->UpdateProgress(static_cast<double>(idx)/
                          static_cast<double>(files.size()));
 
-    // get the index for this file
-    int fileIdx = files[idx].FileIndex;
+    // get the number of frames contained in this file
     int framesInFile = files[idx].FramesInFile;
     std::vector<vtkDICOMReaderFrameInfo>& frames = files[idx].Frames;
     int numFrames = static_cast<int>(frames.size());
 
-    // we need a file buffer if input frames don't match output slices
-    bool needBuffer = (planarToPacked || numFrames != framesInFile);
+    // we need a file buffer if input frames don't match output slices,
+    // or if input data type doesn't match output data type
+    bool needBuffer = (planarToPacked ||
+                       numFrames != framesInFile ||
+                       scalarSize != fileScalarSize);
     for (int sIdx = 0; sIdx < numFrames && !needBuffer; sIdx++)
     {
       needBuffer = (sIdx != frames[sIdx].FrameIndex);
     }
 
+    // this will point to the memory the file will be read into
     unsigned char *bufferPtr = 0;
 
     if (needBuffer)
     {
+      // allocate a buffer for format or datatype conversion
       if (numFrames != framesInPreviousFile)
       {
-        // allocate a buffer for planar-to-packed conversion
         delete [] fileBuffer;
         fileBuffer = new unsigned char[fileFrameSize*framesInFile];
         framesInPreviousFile = numFrames;
@@ -1682,9 +2132,19 @@ int vtkDICOMReader::RequestData(
                            numComponents == 3 &&
                            scalarSize == 1);
 
-    this->ComputeInternalFileName(fileIdx);
+    // this is the method that actually reads the file
     this->ReadOneFile(this->InternalFileName, fileIdx,
                       bufferPtr, framesInFile*fileFrameSize);
+
+    // clear or sign-extend any unused bits
+    int bitsStored = this->MetaData->Get(fileIdx, DC::BitsStored).AsInt();
+    if (bitsStored > 0 && bitsStored < fileScalarSize*8)
+    {
+      int pixelRepresentation =
+        this->MetaData->Get(fileIdx, DC::PixelRepresentation).AsInt();
+      vtkDICOMReader::MaskBits(bufferPtr, framesInFile*fileFrameSize,
+          fileScalarSize, bitsStored, pixelRepresentation);
+    }
 
     // iterate through all frames contained in the file
     for (int sIdx = 0; sIdx < numFrames; sIdx++)
@@ -1697,14 +2157,7 @@ int vtkDICOMReader::RequestData(
       // go to the correct position in the output
       unsigned char *slicePtr =
         (dataPtr + (sliceIdx - extent[4])*sliceSize +
-         componentIdx*filePixelSize*numPlanes);
-
-      // rescale if Rescale was different for different files
-      if (this->NeedsRescale &&
-          this->MetaData->GetAttributeValue(fileIdx, DC::PixelData).IsValid())
-      {
-        this->RescaleBuffer(fileIdx, frameIdx, bufferPtr, sliceSize);
-      }
+         componentIdx*scalarSize*numFileComponents*numPlanes);
 
       // iterate through all color planes in the slice
       unsigned char *planePtr = framePtr;
@@ -1726,7 +2179,14 @@ int vtkDICOMReader::RequestData(
         }
 
         // convert planes into vector components
-        if (planarToPacked)
+        if (this->NeedsRescale)
+        {
+          this->RescaleBuffer(
+            fileIdx, frameIdx, this->FileScalarType, scalarType,
+            numFileComponents, numComponents, planePtr, slicePtr,
+            filePlaneSize);
+        }
+        else if (planarToPacked)
         {
           const unsigned char *tmpInPtr = planePtr;
           unsigned char *tmpOutPtr = slicePtr;
@@ -1759,9 +2219,168 @@ int vtkDICOMReader::RequestData(
   delete [] fileBuffer;
 
   this->UpdateProgress(1.0);
+  this->SetProgressText(0);
   this->InvokeEvent(vtkCommand::EndEvent);
 
   return 1;
+}
+
+//----------------------------------------------------------------------------
+bool vtkDICOMReader::ReadOverlays(vtkImageData *data)
+{
+  bool success = true;
+  int extent[6];
+  data->GetExtent(extent);
+  int nComp = this->FileIndexArray->GetNumberOfComponents();
+  unsigned char *ptr = static_cast<unsigned char *>(data->GetScalarPointer());
+  int scalarSize = data->GetScalarSize();
+  memset(ptr, 0, scalarSize*data->GetNumberOfPoints());
+
+  for (int sIdx = extent[4]; sIdx <= extent[5]; sIdx++)
+  {
+    for (int cIdx = 0; cIdx < nComp; cIdx++)
+    {
+      int fileIdx = this->FileIndexArray->GetComponent(sIdx, cIdx);
+      int frameIdx = this->FrameIndexArray->GetComponent(sIdx, cIdx);
+      int rows = this->MetaData->Get(fileIdx, DC::Rows).AsInt();
+
+      // loop through all possible overlays
+      int maxOverlay = (scalarSize > 1 ? 15 : 7);
+      for (int i = 0; i <= maxOverlay; i++)
+      {
+        // compute group number for this overlay
+        unsigned short g = 0x6000 + 2*i;
+
+        const vtkDICOMValue& overlayData =
+          this->MetaData->Get(fileIdx, vtkDICOMTag(g, 0x3000));
+        unsigned int vl = overlayData.GetVL();
+        const unsigned char *bptr = overlayData.GetUnsignedCharData();
+        if (bptr == 0)
+        {
+          bptr = reinterpret_cast<const unsigned char *>(
+                   overlayData.GetUnsignedShortData());
+        }
+        if (bptr == 0)
+        {
+          continue;
+        }
+
+        int sizeX = this->MetaData->Get(fileIdx, vtkDICOMTag(g,0x0011)).AsInt();
+        int sizeY = this->MetaData->Get(fileIdx, vtkDICOMTag(g,0x0010)).AsInt();
+
+        int startX = 0;
+        int startY = 0;
+        const vtkDICOMValue& ov =
+          this->MetaData->Get(fileIdx, vtkDICOMTag(g,0x0050));
+        if (ov.GetNumberOfValues() >= 2)
+        {
+          startX = ov.GetInt(1) - 1;
+          startY = ov.GetInt(0) - 1;
+        }
+
+        int numFrames =
+          this->MetaData->Get(fileIdx, vtkDICOMTag(g,0x0015)).AsInt();
+        int frameOrigin =
+          this->MetaData->Get(fileIdx, vtkDICOMTag(g,0x0051)).AsInt();
+        frameOrigin = (frameOrigin > 0 ? frameOrigin-1 : 0);
+
+        // make sure this frame exists in the overlay
+        if (numFrames &&
+            (frameIdx < frameOrigin || frameIdx > frameOrigin+numFrames-1))
+        {
+          continue;
+        }
+
+        size_t bitsNeeded = (numFrames == 0 ? 1 : numFrames);
+        bitsNeeded = bitsNeeded*sizeX*sizeY;
+        if ((bitsNeeded + 7)/8 > vl)
+        {
+          this->SetErrorCode(vtkErrorCode::FileFormatError);
+          vtkErrorMacro("OverlayData length " << vl << " too small for size "
+                        << sizeX << "x" << sizeY
+                        << " (frames=" << numFrames << ")");
+          success = false;
+          continue;
+        }
+
+        // compute the number of frames to skip when reading the file
+        vtkIdType inSkip =
+          static_cast<vtkIdType>(frameIdx - frameOrigin)*sizeX*sizeY;
+
+        // compute the initial offset into the output
+        vtkIdType outSkip = static_cast<vtkIdType>(sIdx - extent[4])*
+          (extent[3] - extent[2] + 1)*(extent[1] - extent[0] + 1)*
+          nComp*scalarSize;
+        outSkip += cIdx*scalarSize;
+#ifdef VTK_WORDS_BIGENDIAN
+        outSkip += (scalarSize == 2 && i <= 7);
+#else
+        outSkip += (scalarSize == 2 && i > 7);
+#endif
+
+        vtkIdType outRowInc =
+          static_cast<vtkIdType>(extent[1] - extent[0] + 1)*scalarSize*nComp;
+        int extentY[2] = { extent[2], extent[3] };
+        if (this->MemoryRowOrder == vtkDICOMReader::BottomUp)
+        {
+          outSkip += outRowInc*(extent[3]-extent[2]);
+          outRowInc = -outRowInc;
+          extentY[0] = rows - extent[3] - 1;
+          extentY[1] = rows - extent[2] - 1;
+        }
+
+        // find the number of rows to read from the file
+        int countY = sizeY;
+        if (extentY[0] < startY)
+        {
+          outSkip += (startY - extentY[0])*outRowInc;
+        }
+        else
+        {
+          inSkip += static_cast<vtkIdType>(extentY[0] - startY)*sizeX;
+          countY -= extentY[0] - startY;
+        }
+        if (startY + countY - 1 > extentY[1])
+        {
+          countY = extentY[1] - startY + 1;
+        }
+
+        // find the number of pixels per row to read from the file
+        int countX = sizeX;
+        if (extent[0] < startX)
+        {
+          outSkip +=
+            static_cast<vtkIdType>(startX - extent[0])*scalarSize*nComp;
+        }
+        else
+        {
+          inSkip += extent[0] - startX;
+          countX -= extent[0] - startX;
+        }
+        if (startX + countX - 1 > extent[1])
+        {
+          countX = extent[1] - startX + 1;
+        }
+
+        // make sure there is something to do
+        if (countX <= 0 || countY <= 0)
+        {
+          continue;
+        }
+
+        for (int j = 0; j < countY; j++)
+        {
+          vtkDICOMReader::UnpackOverlay(
+             bptr, inSkip, countX,
+             ptr + outSkip, nComp*scalarSize, (i & 0x7));
+          inSkip += sizeX;
+          outSkip += outRowInc;
+        }
+      }
+    }
+  }
+
+  return success;
 }
 
 //----------------------------------------------------------------------------
@@ -1785,13 +2404,31 @@ void vtkDICOMReader::RelayError(vtkObject *o, unsigned long e, void *data)
     }
     else
     {
-      vtkErrorMacro(<< "An unknown error ocurred!");
+      vtkErrorMacro(<< "An unknown error occurred!");
     }
   }
   else
   {
     this->InvokeEvent(e, data);
   }
+}
+
+//----------------------------------------------------------------------------
+vtkImageData *vtkDICOMReader::GetOverlayOutput()
+{
+  return this->GetOutput(1);
+}
+
+//----------------------------------------------------------------------------
+vtkAlgorithmOutput *vtkDICOMReader::GetOverlayOutputPort()
+{
+  return this->GetOutputPort(1);
+}
+
+//----------------------------------------------------------------------------
+void vtkDICOMReader::SetOverlayOutput(vtkImageData *data)
+{
+  this->GetExecutive()->SetOutputData(1, data);
 }
 
 //----------------------------------------------------------------------------
@@ -1814,81 +2451,61 @@ void vtkDICOMReader::UpdateMedicalImageProperties()
   vtkMedicalImageProperties *properties = this->MedicalImageProperties;
 
   const vtkDICOMValue *vptr;
-  vptr = &meta->GetAttributeValue(DC::PatientName);
+  vptr = &meta->Get(DC::PatientName);
   properties->SetPatientName(vptr->IsValid() ?
     vptr->AsUTF8String().c_str() : NULL);
-  vptr = &meta->GetAttributeValue(DC::PatientID);
+  vptr = &meta->Get(DC::PatientID);
   properties->SetPatientID(vptr->IsValid() ?
     vptr->AsUTF8String().c_str() : NULL);
-  properties->SetPatientAge(
-    meta->GetAttributeValue(DC::PatientAge).GetCharData());
-  properties->SetPatientSex(
-    meta->GetAttributeValue(DC::PatientSex).GetCharData());
+  properties->SetPatientAge(meta->Get(DC::PatientAge).GetCharData());
+  properties->SetPatientSex(meta->Get(DC::PatientSex).GetCharData());
   properties->SetPatientBirthDate(
-    meta->GetAttributeValue(DC::PatientBirthDate).GetCharData());
-  properties->SetStudyDate(
-    meta->GetAttributeValue(DC::StudyDate).GetCharData());
-  properties->SetAcquisitionDate(
-    meta->GetAttributeValue(DC::AcquisitionDate).GetCharData());
-  properties->SetStudyTime(
-    meta->GetAttributeValue(DC::StudyTime).GetCharData());
-  properties->SetAcquisitionTime(
-    meta->GetAttributeValue(DC::AcquisitionTime).GetCharData());
-  properties->SetImageDate(
-    meta->GetAttributeValue(DC::ContentDate).GetCharData());
-  properties->SetImageTime(
-    meta->GetAttributeValue(DC::ContentTime).GetCharData());
-  properties->SetImageNumber(
-    meta->GetAttributeValue(DC::InstanceNumber).GetCharData());
-  properties->SetSeriesNumber(
-    meta->GetAttributeValue(DC::SeriesNumber).GetCharData());
-  vptr = &meta->GetAttributeValue(DC::SeriesDescription);
+    meta->Get(DC::PatientBirthDate).GetCharData());
+  properties->SetStudyDate(meta->Get(DC::StudyDate).GetCharData());
+  properties->SetAcquisitionDate(meta->Get(DC::AcquisitionDate).GetCharData());
+  properties->SetStudyTime(meta->Get(DC::StudyTime).GetCharData());
+  properties->SetAcquisitionTime(meta->Get(DC::AcquisitionTime).GetCharData());
+  properties->SetImageDate(meta->Get(DC::ContentDate).GetCharData());
+  properties->SetImageTime(meta->Get(DC::ContentTime).GetCharData());
+  properties->SetImageNumber(meta->Get(DC::InstanceNumber).GetCharData());
+  properties->SetSeriesNumber(meta->Get(DC::SeriesNumber).GetCharData());
+  vptr = &meta->Get(DC::SeriesDescription);
   properties->SetSeriesDescription(vptr->IsValid() ?
     vptr->AsUTF8String().c_str() : NULL);
-  vptr = &meta->GetAttributeValue(DC::StudyID);
+  vptr = &meta->Get(DC::StudyID);
   properties->SetStudyID(vptr->IsValid() ?
     vptr->AsUTF8String().c_str() : NULL);
-  vptr = &meta->GetAttributeValue(DC::StudyDescription);
+  vptr = &meta->Get(DC::StudyDescription);
   properties->SetStudyDescription(vptr->IsValid() ?
     vptr->AsUTF8String().c_str() : NULL);
-  properties->SetModality(
-    meta->GetAttributeValue(DC::Modality).GetCharData());
-  vptr = &meta->GetAttributeValue(DC::Manufacturer);
+  properties->SetModality(meta->Get(DC::Modality).GetCharData());
+  vptr = &meta->Get(DC::Manufacturer);
   properties->SetManufacturer(vptr->IsValid() ?
     vptr->AsUTF8String().c_str() : NULL);
-  vptr = &meta->GetAttributeValue(DC::ManufacturerModelName);
+  vptr = &meta->Get(DC::ManufacturerModelName);
   properties->SetManufacturerModelName(vptr->IsValid() ?
     vptr->AsUTF8String().c_str() : NULL);
-  vptr = &meta->GetAttributeValue(DC::StationName);
+  vptr = &meta->Get(DC::StationName);
   properties->SetStationName(vptr->IsValid() ?
     vptr->AsUTF8String().c_str() : NULL);
-  vptr = &meta->GetAttributeValue(DC::InstitutionName);
+  vptr = &meta->Get(DC::InstitutionName);
   properties->SetInstitutionName(vptr->IsValid() ?
     vptr->AsUTF8String().c_str() : NULL);
-  vptr = &meta->GetAttributeValue(DC::ConvolutionKernel);
+  vptr = &meta->Get(DC::ConvolutionKernel);
   properties->SetConvolutionKernel(vptr->IsValid() ?
     vptr->AsUTF8String().c_str() : NULL);
-  properties->SetSliceThickness(
-    meta->GetAttributeValue(DC::SliceThickness).GetCharData());
-  properties->SetKVP(
-    meta->GetAttributeValue(DC::KVP).GetCharData());
-  properties->SetGantryTilt(
-    meta->GetAttributeValue(DC::GantryAngle).GetCharData());
-  properties->SetEchoTime(
-    meta->GetAttributeValue(DC::EchoTime).GetCharData());
-  properties->SetEchoTrainLength(
-    meta->GetAttributeValue(DC::EchoTrainLength).GetCharData());
-  properties->SetRepetitionTime(
-    meta->GetAttributeValue(DC::RepetitionTime).GetCharData());
-  properties->SetExposureTime(
-    meta->GetAttributeValue(DC::ExposureTime).GetCharData());
-  properties->SetXRayTubeCurrent(
-    meta->GetAttributeValue(DC::XRayTubeCurrent).GetCharData());
-  properties->SetExposure(
-    meta->GetAttributeValue(DC::Exposure).GetCharData());
+  properties->SetSliceThickness(meta->Get(DC::SliceThickness).GetCharData());
+  properties->SetKVP(meta->Get(DC::KVP).GetCharData());
+  properties->SetGantryTilt(meta->Get(DC::GantryAngle).GetCharData());
+  properties->SetEchoTime(meta->Get(DC::EchoTime).GetCharData());
+  properties->SetEchoTrainLength(meta->Get(DC::EchoTrainLength).GetCharData());
+  properties->SetRepetitionTime(meta->Get(DC::RepetitionTime).GetCharData());
+  properties->SetExposureTime(meta->Get(DC::ExposureTime).GetCharData());
+  properties->SetXRayTubeCurrent(meta->Get(DC::XRayTubeCurrent).GetCharData());
+  properties->SetExposure(meta->Get(DC::Exposure).GetCharData());
 
-  const vtkDICOMValue& center = meta->GetAttributeValue(DC::WindowCenter);
-  const vtkDICOMValue& width = meta->GetAttributeValue(DC::WindowWidth);
+  const vtkDICOMValue& center = meta->Get(DC::WindowCenter);
+  const vtkDICOMValue& width = meta->Get(DC::WindowWidth);
 
   int n = static_cast<int>(center.GetNumberOfValues());
   int m = static_cast<int>(width.GetNumberOfValues());
@@ -1900,8 +2517,7 @@ void vtkDICOMReader::UpdateMedicalImageProperties()
       center.GetDouble(i), width.GetDouble(i));
   }
 
-  const vtkDICOMValue& comment =
-    meta->GetAttributeValue(DC::WindowCenterWidthExplanation);
+  const vtkDICOMValue& comment = meta->Get(DC::WindowCenterWidthExplanation);
   m = static_cast<int>(comment.GetNumberOfValues());
   m = (n < m ? n : m);
   for (int j = 0; j < m; j++)

@@ -1,24 +1,29 @@
+if(POLICY CMP0063)
+  cmake_policy(SET CMP0063 NEW)
+endif()
+
 include_directories(${DICOM_INCLUDE_DIRS})
 
-if("${VTK_MAJOR_VERSION}" GREATER 5)
-  set(VTK_RENDERING_LIBS vtkRenderingImage vtkInteractionStyle
-      vtkRenderingFreeType) # VTK 6.x
-  set(VTK_GL_LIBS vtkRenderingOpenGL vtkRenderingFreeTypeOpenGL
-      vtkRenderingOpenGL2 vtkRenderingFreeTypeOpenGL2)
-  foreach(TMP_LIB ${VTK_GL_LIBS})
-    list(FIND VTK_LIBRARIES ${TMP_LIB} TMP_INDEX)
-    if(TMP_INDEX GREATER -1)
-      set(VTK_RENDERING_LIBS ${VTK_RENDERING_LIBS} ${TMP_LIB})
+if(NOT VTK_VERSION VERSION_LESS 6)
+  set(VTK_RENDERING_LIBS)
+  foreach(_lib RenderingImage InteractionStyle RenderingFreeType)
+    list(APPEND VTK_RENDERING_LIBS ${VTK_TARGET_PREFIX}${_lib})
+  endforeach()
+  foreach(_lib RenderingOpenGL RenderingFreeTypeOpenGL
+               RenderingOpenGL2 RenderingFreeTypeOpenGL2)
+    list(FIND VTK_LIBRARIES ${VTK_TARGET_PREFIX}${_lib} _index)
+    if(_index GREATER -1)
+      list(APPEND VTK_RENDERING_LIBS ${VTK_TARGET_PREFIX}${_lib})
     endif()
   endforeach()
 else()
   set(VTK_RENDERING_LIBS vtkRendering) # VTK 5.x
 endif()
 
-set(BASE_LIBS vtkDICOM ${VTK_LIBS})
+set(BASE_LIBS ${VTK_DICOM_LINK_TARGET} ${VTK_LIBS})
 
 add_executable(TestDICOMCompiler TestDICOMCompiler.cxx)
-target_link_libraries(TestDICOMCompiler ${BASE_LIBS} ${KWSYS_LIBS})
+target_link_libraries(TestDICOMCompiler ${BASE_LIBS})
 
 add_executable(TestDICOMDirectory TestDICOMDirectory.cxx)
 target_link_libraries(TestDICOMDirectory ${BASE_LIBS})
@@ -41,6 +46,9 @@ target_link_libraries(TestDICOMRealWorldValue ${BASE_LIBS})
 if(VTK_MAJOR_VERSION GREATER 5 OR VTK_MINOR_VERSION GREATER 9)
 add_executable(TestDICOMDisplay TestDICOMDisplay.cxx)
 target_link_libraries(TestDICOMDisplay ${BASE_LIBS} ${VTK_RENDERING_LIBS})
+
+add_executable(TestDICOMOverlay TestDICOMOverlay.cxx)
+target_link_libraries(TestDICOMOverlay ${BASE_LIBS} ${VTK_RENDERING_LIBS})
 
 add_executable(TestNIFTIDisplay TestNIFTIDisplay.cxx)
 target_link_libraries(TestNIFTIDisplay ${BASE_LIBS} ${VTK_RENDERING_LIBS})

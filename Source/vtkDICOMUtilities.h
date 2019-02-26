@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -14,9 +14,10 @@
 #ifndef vtkDICOMUtilities_h
 #define vtkDICOMUtilities_h
 
-#include <vtkObject.h>
-#include <vtkStdString.h> // For std::string
+#include "vtkObject.h"
+#include "vtkStdString.h" // For std::string
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
 #include "vtkDICOMTag.h" // For method parameter
 
 class vtkStringArray;
@@ -33,11 +34,7 @@ public:
   vtkTypeMacro(vtkDICOMUtilities, vtkObject);
 
   //! Print a summary of the contents of this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
   //@}
 
   //@{
@@ -100,15 +97,16 @@ public:
    */
   static long long ConvertDateTime(const char *datetime);
 
-  //! Get the current UTC time in microseconds and an offset to localtime.
+  //! Get the current time in microseconds.
   /*!
    *  The time is in microseconds since the UNIX epoch (00:00:00 UTC on
-   *  1 Jan 1970).  The offset can be added to the returned UTC time in
-   *  order to get the local time.  If you do not need the offset, you
-   *  can pass a null pointer.
+   *  1 Jan 1970).
    */
-  static long long GetUTC(long long *offset);
+  static long long GetUniversalTime();
   //@}
+
+  //! Deprecated method, do not use.
+  static long long GetUTC(long long *offset);
 
   //@{
   //! Check if the specified file is a DICOM file.
@@ -180,6 +178,17 @@ public:
   //@}
 
   //@{
+  //! Check that a string is valid utf-8.
+  /*!
+   *  The string is valid if it contains no NULL bytes and if it contains
+   *  only valid 1-byte, 2-byte, 3-byte, or 4-byte utf-8 sequences.  Any
+   *  overlength sequences or sequences that encode values above U+10FFFF
+   *  or between U+D800 and U+DFFF are considered invalid.
+   */
+  static bool IsValidUTF8(const char *text, size_t l);
+  //@}
+
+  //@{
   //! Get the name associated with the given UID.
   static const char *GetUIDName(const char *uid);
 
@@ -191,17 +200,19 @@ protected:
   vtkDICOMUtilities() {}
   ~vtkDICOMUtilities() {}
 
+  static long long GetLocalOffset(long long t);
+
   static char UIDPrefix[64];
   static char ImplementationClassUID[65];
   static char ImplementationVersionName[17];
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMUtilities(const vtkDICOMUtilities&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMUtilities&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMUtilities(const vtkDICOMUtilities&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMUtilities&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMUtilities(const vtkDICOMUtilities&);
-  void operator=(const vtkDICOMUtilities&);
+  vtkDICOMUtilities(const vtkDICOMUtilities&) = delete;
+  void operator=(const vtkDICOMUtilities&) = delete;
 #endif
 };
 

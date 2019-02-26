@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -33,11 +33,7 @@ public:
   vtkTypeMacro(vtkDICOMCTGenerator, vtkDICOMGenerator);
 
   //! Print information about this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
 
   //! Generate an instance of one of the supported classes.
   /*!
@@ -45,11 +41,7 @@ public:
    *  information for a vtkImageData object, it will populate the
    *  attributes of the supplied vtkDICOMMetaData object.
    */
-#ifdef VTK_OVERRIDE
-  bool GenerateInstance(vtkInformation *info) VTK_OVERRIDE;
-#else
-  bool GenerateInstance(vtkInformation *info);
-#endif
+  bool GenerateInstance(vtkInformation *info) VTK_DICOM_OVERRIDE;
 
 protected:
   vtkDICOMCTGenerator();
@@ -65,12 +57,12 @@ protected:
   virtual bool GenerateCTInstance(vtkInformation *info);
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMCTGenerator(const vtkDICOMCTGenerator&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMCTGenerator&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMCTGenerator(const vtkDICOMCTGenerator&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMCTGenerator&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMCTGenerator(const vtkDICOMCTGenerator&);
-  void operator=(const vtkDICOMCTGenerator&);
+  vtkDICOMCTGenerator(const vtkDICOMCTGenerator&) = delete;
+  void operator=(const vtkDICOMCTGenerator&) = delete;
 #endif
 };
 

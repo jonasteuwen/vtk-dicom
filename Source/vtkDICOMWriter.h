@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -11,22 +11,24 @@
      PURPOSE.  See the above copyright notice for more information.
 
 =========================================================================*/
-/*! \class vtkDICOMWriter
- *  \brief Write DICOM image files.
+/**
+ * \class vtkDICOMWriter
+ * \brief Write DICOM image files.
  *
- *  This class writes a series of one or more DICOM files.  The default
- *  behavior is to write a series of Secondary Capture files with no
- *  modality-specific information.  To write other kinds of DICOM files,
- *  use the SetGenerator() method to supply a generator for the type of
- *  data set that you wish to write.  Currently, there are generators for
- *  MR and CT data sets.
+ * This class writes a series of one or more DICOM files.  The default
+ * behavior is to write a series of Secondary Capture files with no
+ * modality-specific information.  To write other kinds of DICOM files,
+ * use the SetGenerator() method to supply a generator for the type of
+ * data set that you wish to write.  Currently, there are generators for
+ * MR and CT data sets.
  */
 
 #ifndef vtkDICOMWriter_h
 #define vtkDICOMWriter_h
 
-#include <vtkImageWriter.h>
+#include "vtkImageWriter.h"
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
 
 class vtkMatrix4x4;
 class vtkDICOMMetaData;
@@ -41,11 +43,7 @@ public:
   static vtkDICOMWriter *New();
 
   //! Print information about this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
 
   //@{
   //! Set a short description (max 64 chars) for the DICOM series.
@@ -211,12 +209,23 @@ public:
   //@}
 
   //@{
+  //! Provide an overlay to be written with the data.
+  void SetOverlayInputData(vtkImageData *data);
+  void SetOverlayInputConnection(vtkAlgorithmOutput *data);
+  vtkImageData *GetOverlayInput();
+  //@}
+
+  //@{
+  //! Set the overlay type.
+  vtkSetMacro(OverlayType, int);
+  vtkGetMacro(OverlayType, int);
+  void SetOverlayTypeToGraphics() { this->SetOverlayType(0); }
+  void SetOverlayTypeToROI() { this->SetOverlayType(1); }
+  //@}
+
+  //@{
   //! Write the file to disk.
-#ifdef VTK_OVERRIDE
-  void Write() VTK_OVERRIDE;
-#else
-  void Write();
-#endif
+  void Write() VTK_DICOM_OVERRIDE;
   //@}
 
 protected:
@@ -232,16 +241,16 @@ protected:
   //! Generate the meta data to be written for the files.
   virtual int GenerateMetaData(vtkInformation *info);
 
+  //! Generate the overlays.
+  virtual void GenerateOverlays(int minFileIdx, int maxFileIdx,
+                                const int extent[4]);
+
   //! The main execution method, which writes the file.
-#ifdef VTK_OVERRIDE
+  int FillInputPortInformation(int port, vtkInformation *info) VTK_DICOM_OVERRIDE;
+
   int RequestData(vtkInformation *request,
                   vtkInformationVector** inputVector,
-                  vtkInformationVector* outputVector) VTK_OVERRIDE;
-#else
-  int RequestData(vtkInformation *request,
-                  vtkInformationVector** inputVector,
-                  vtkInformationVector* outputVector);
-#endif
+                  vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
 
   //! The meta data set by the user.
   vtkDICOMMetaData *MetaData;
@@ -275,6 +284,9 @@ protected:
   //! The DICOM Image Type.
   char *ImageType;
 
+  //! The overlay type.
+  int OverlayType;
+
   //! The row order to use when storing the data in memory.
   int MemoryRowOrder;
 
@@ -285,12 +297,12 @@ protected:
   int Streaming;
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMWriter(const vtkDICOMWriter&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMWriter&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMWriter(const vtkDICOMWriter&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMWriter&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMWriter(const vtkDICOMWriter&);
-  void operator=(const vtkDICOMWriter&);
+  vtkDICOMWriter(const vtkDICOMWriter&) = delete;
+  void operator=(const vtkDICOMWriter&) = delete;
 #endif
 };
 

@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2016 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -11,20 +11,22 @@
      PURPOSE.  See the above copyright notice for more information.
 
 =========================================================================*/
-/*! \class vtkDICOMAlgorithm
- *  \brief Superclass for DICOM image filters
+/**
+ * \class vtkDICOMAlgorithm
+ * \brief Superclass for DICOM image filters
  *
- *  This class allows the DICOM meta data to be carried by the VTK pipeline.
- *  Subclasses should always call Superclass::RequestInformation() and
- *  Superclass::RequestData within their own RequestInformation and
- *  RequestData methods.
+ * This class allows the DICOM meta data to be carried by the VTK pipeline.
+ * Subclasses should always call Superclass::RequestInformation() and
+ * Superclass::RequestData within their own RequestInformation and
+ * RequestData methods.
  */
 
 #ifndef vtkDICOMAlgorithm_h
 #define vtkDICOMAlgorithm_h
 
-#include <vtkThreadedImageAlgorithm.h>
+#include "vtkThreadedImageAlgorithm.h"
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
 
 class vtkLookupTable;
 class vtkInformationDataObjectKey;
@@ -43,11 +45,7 @@ public:
   static vtkDICOMAlgorithm *New();
 
   //! Print information about this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
   //@}
 
   //@{
@@ -84,41 +82,26 @@ protected:
     vtkInformation *outInfo, vtkDataObject *outData);
   //@}
 
-#ifdef VTK_OVERRIDE
   int RequestInformation(
     vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector) VTK_OVERRIDE;
+    vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
 
   int RequestData(
     vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector) VTK_OVERRIDE;
+    vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
 
   void ThreadedRequestData(
     vtkInformation *request, vtkInformationVector **inputVector,
     vtkInformationVector *outputVector, vtkImageData ***inData,
-    vtkImageData **outData, int ext[6], int id) VTK_OVERRIDE;
-#else
-  int RequestInformation(
-    vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector);
-
-  int RequestData(
-    vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector);
-
-  void ThreadedRequestData(
-    vtkInformation *request, vtkInformationVector **inputVector,
-    vtkInformationVector *outputVector, vtkImageData ***inData,
-    vtkImageData **outData, int ext[6], int id);
-#endif
+    vtkImageData **outData, int ext[6], int id) VTK_DICOM_OVERRIDE;
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMAlgorithm(const vtkDICOMAlgorithm&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMAlgorithm&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMAlgorithm(const vtkDICOMAlgorithm&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMAlgorithm&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMAlgorithm(const vtkDICOMAlgorithm&);
-  void operator=(const vtkDICOMAlgorithm&);
+  vtkDICOMAlgorithm(const vtkDICOMAlgorithm&) = delete;
+  void operator=(const vtkDICOMAlgorithm&) = delete;
 #endif
 };
 

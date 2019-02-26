@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2016 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -14,9 +14,10 @@
 #ifndef vtkDICOMUIDGenerator_h
 #define vtkDICOMUIDGenerator_h
 
-#include <vtkObject.h>
-#include <vtkStdString.h> // For std::string
+#include "vtkObject.h"
+#include "vtkStdString.h" // For std::string
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
 #include "vtkDICOMTag.h" // For method parameter
 
 class vtkStringArray;
@@ -42,11 +43,7 @@ public:
   //@}
 
   //! Print information about this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
 
   //@{
   //! Set a UID prefix to use when generating UIDs.
@@ -108,12 +105,12 @@ protected:
 private:
   friend class vtkDICOMUIDGeneratorInitializer;
 
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMUIDGenerator(const vtkDICOMUIDGenerator&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMUIDGenerator&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMUIDGenerator(const vtkDICOMUIDGenerator&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMUIDGenerator&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMUIDGenerator(const vtkDICOMUIDGenerator&);
-  void operator=(const vtkDICOMUIDGenerator&);
+  vtkDICOMUIDGenerator(const vtkDICOMUIDGenerator&) = delete;
+  void operator=(const vtkDICOMUIDGenerator&) = delete;
 #endif
 };
 
@@ -129,15 +126,16 @@ public:
   vtkDICOMUIDGeneratorInitializer();
   ~vtkDICOMUIDGeneratorInitializer();
 private:
-#ifdef VTK_DELETE_FUNCTION
+#ifdef VTK_DICOM_DELETE
   vtkDICOMUIDGeneratorInitializer(
-    const vtkDICOMUIDGeneratorInitializer&) VTK_DELETE_FUNCTION;
+    const vtkDICOMUIDGeneratorInitializer&) VTK_DICOM_DELETE;
   vtkDICOMUIDGeneratorInitializer& operator=(
-    const vtkDICOMUIDGeneratorInitializer&) VTK_DELETE_FUNCTION;
+    const vtkDICOMUIDGeneratorInitializer&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMUIDGeneratorInitializer(const vtkDICOMUIDGeneratorInitializer&);
+  vtkDICOMUIDGeneratorInitializer(
+    const vtkDICOMUIDGeneratorInitializer&) = delete;
   vtkDICOMUIDGeneratorInitializer& operator=(
-    const vtkDICOMUIDGeneratorInitializer&);
+    const vtkDICOMUIDGeneratorInitializer&) = delete;
 #endif
 };
 

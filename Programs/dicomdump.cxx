@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2016 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -25,9 +25,9 @@
 #include "mainmacro.h"
 #include "readquery.h"
 
-#include <vtkSortFileNames.h>
-#include <vtkStringArray.h>
-#include <vtkSmartPointer.h>
+#include "vtkSortFileNames.h"
+#include "vtkStringArray.h"
+#include "vtkSmartPointer.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -42,7 +42,7 @@ void printVersion(FILE *file, const char *cp)
 {
   fprintf(file, "%s %s\n", cp, DICOM_VERSION);
   fprintf(file, "\n"
-    "Copyright (c) 2012-2016, David Gobbi.\n\n"
+    "Copyright (c) 2012-2019, David Gobbi.\n\n"
     "This software is distributed under an open-source license.  See the\n"
     "Copyright.txt file that comes with the vtk-dicom source distribution.\n");
 }
@@ -55,6 +55,7 @@ void printUsage(FILE *file, const char *cp)
   fprintf(file, "options:\n"
     "  -k tag          Provide a key to be printed.\n"
     "  -q <query.txt>  Provide a file that lists which elements to print.\n"
+    "  --charset <cs>  Charset to use if SpecificCharacterSet is missing.\n"
     "  --help          Print a brief help message.\n"
     "  --version       Print the software version.\n");
 }
@@ -166,46 +167,65 @@ void printElement(
              vr == vtkDICOMVR::ST ||
              vr == vtkDICOMVR::UT)
     {
-      // replace breaks with "\\", cap length to MAX_LENGTH
-      size_t l = (vl > MAX_LENGTH ? MAX_LENGTH-4 : vl);
+      vtkDICOMCharacterSet cs = v.GetCharacterSet();
       const char *cp = v.GetCharData();
-      std::string utf8;
-      if (v.GetCharacterSet() != vtkDICOMCharacterSet::ISO_IR_6)
+      size_t l = vl;
+      bool truncated = false;
+      while (l > 0 && cp[l-1] == ' ')
       {
-        utf8 = v.GetCharacterSet().ConvertToUTF8(cp, l);
-        l = utf8.length();
-        cp = utf8.data();
+        l--;
       }
-      size_t j = 0;
-      while (j < l && cp[j] != '\0')
+      if (l > MAX_LENGTH)
       {
-        size_t k = j;
-        size_t m = j;
-        for (; j < l && cp[j] != '\0'; j++)
+        l = MAX_LENGTH;
+        truncated = true;
+      }
+      std::string utf8 = cs.ToSafeUTF8(cp, l);
+      cp = utf8.data();
+      l = utf8.length();
+      if (l > MAX_LENGTH)
+      {
+        l = MAX_LENGTH-3;
+        truncated = true;
+        // remove possibly incomplete final character
+        while (l > 1 && (cp[l-1] & 0xC0) == 0x80)
         {
-          m = j;
-          if (cp[j] == '\r' || cp[j] == '\n' || cp[j] == '\f')
-          {
-            do { j++; }
-            while (j < l && (cp[j] == '\r' || cp[j] == '\n' || cp[j] == '\f'));
-            break;
-          }
-          m++;
+          l--;
         }
-        if (j == l)
+        l--;
+      }
+      s.append(cp, l);
+      if (truncated)
+      {
+        s.append("...");
+      }
+    }
+    else if (vr.HasTextValue())
+    {
+      vtkDICOMCharacterSet cs = v.GetCharacterSet();
+      const char *cp = v.GetCharData();
+      const char *ep = cp + vl;
+      size_t pos = 0;
+      while (cp != ep && *cp != '\0')
+      {
+        size_t n = cs.NextBackslash(cp, ep);
+        while (n > 0 && *cp == ' ') { cp++; n--; }
+        size_t m = n;
+        while (m > 0 && cp[m-1] == ' ') { m--; }
+        s.append(cs.ToSafeUTF8(cp, m));
+        cp += n;
+        if (cp != ep && *cp == '\\')
         {
-          while (m > 0 && cp[m-1] == ' ') { m--; }
+          s.append(cp, 1);
+          cp++;
         }
-        if (k != 0)
+        if (s.size() > MAX_LENGTH-4)
         {
-          s.append("\\\\");
-        }
-        s.append(&cp[k], m-k);
-        if (vl > MAX_LENGTH)
-        {
+          s.resize(pos);
           s.append("...");
           break;
         }
+        pos = s.size();
       }
     }
     else
@@ -215,7 +235,7 @@ void printElement(
       size_t pos = 0;
       for (size_t i = 0; i < n; i++)
       {
-        v.AppendValueToUTF8String(s, i);
+        v.AppendValueToString(s, i);
         if (i < n - 1)
         {
           s.append("\\");
@@ -362,7 +382,7 @@ void printElementFromTagPath(
             vtkDICOMDictionary::FindDictEntry(p.GetHead());
           vtkDICOMVR vr = entry.GetVR();
           const char *name = entry.GetName();
-          name = (name ? name : "Unknown");
+          name = ((name && name[0]) ? name : "Unknown");
           printf("(%04X,%04X) %s \"%s\" : (nested)\n",
             g, e, vr.GetText(), name);
           break;
@@ -375,7 +395,7 @@ void printElementFromTagPath(
           const vtkDICOMItem *items = iter->GetValue(j).GetSequenceData();
           if (items)
           {
-            size_t n = iter->GetValue().GetNumberOfValues();
+            size_t n = iter->GetValue(j).GetNumberOfValues();
             for (size_t i = 0; i < n; i++)
             {
               printElementFromTagPathRecurse(
@@ -416,6 +436,9 @@ int MAINMACRO(int argc, char *argv[])
   // for the optional query file
   QueryTagList qtlist;
   vtkDICOMItem query;
+
+  // for the default character set
+  vtkDICOMCharacterSet charset;
 
   if (argc < 2)
   {
@@ -465,9 +488,8 @@ int MAINMACRO(int argc, char *argv[])
     }
     else if (strcmp(arg, "-k") == 0)
     {
-      vtkDICOMTag tag;
       ++argi;
-      if (argi == argc)
+      if (argi == argc || argv[argi][0] == '-')
       {
         fprintf(stderr, "%s must be followed by gggg,eeee=value "
                         "where gggg,eeee is a DICOM tag.\n\n", arg);
@@ -475,6 +497,23 @@ int MAINMACRO(int argc, char *argv[])
       }
       if (!dicomcli_readkey(argv[argi], &query, &qtlist))
       {
+        return 1;
+      }
+    }
+    else if (strcmp(arg, "--charset") == 0)
+    {
+      ++argi;
+      if (argi == argc || argv[argi][0] == '-')
+      {
+        fprintf(stderr, "%s must be followed by a valid character set\n\n",
+                arg);
+        return 1;
+      }
+      charset = vtkDICOMCharacterSet(argv[argi]);
+      if (charset.GetKey() == vtkDICOMCharacterSet::Unknown)
+      {
+        fprintf(stderr, "%s %s is not a known character set\n\n",
+                arg, argv[argi]);
         return 1;
       }
     }
@@ -495,17 +534,33 @@ int MAINMACRO(int argc, char *argv[])
     vtkSmartPointer<vtkDICOMDirectory>::New();
   sorter->RequirePixelDataOff();
   sorter->SetScanDepth(0);
+  sorter->IgnoreDicomdirOn();
   sorter->SetFindQuery(query);
   sorter->SetInputFileNames(files);
   sorter->Update();
 
   vtkSmartPointer<vtkDICOMParser> parser =
     vtkSmartPointer<vtkDICOMParser>::New();
+  parser->SetDefaultCharacterSet(charset);
+  parser->SetQueryItem(query);
 
   vtkSmartPointer<vtkDICOMMetaData> data =
     vtkSmartPointer<vtkDICOMMetaData>::New();
   parser->SetMetaData(data);
 
+      {
+        vtkDICOMDataElementIterator iter = query.Begin();
+        vtkDICOMDataElementIterator iterEnd = query.End();
+
+        for (; iter != iterEnd; ++iter)
+        {
+          printElement(data, 0, iter, 0, 0);
+        }
+        for (size_t i = 0; i < qtlist.size(); i++)
+        {
+          std::cout << qtlist[i] << "\n";
+        }
+      }
   int m = sorter->GetNumberOfStudies();
   for (int j = 0; j < m; j++)
   {

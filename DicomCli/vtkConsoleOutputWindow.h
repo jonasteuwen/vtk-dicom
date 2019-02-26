@@ -22,19 +22,15 @@
 #define vtkConsoleOutputWindow_h
 
 #include "vtkOutputWindow.h"
+#include "vtkDICOMConfig.h"
 
 class vtkConsoleOutputWindow : public vtkOutputWindow
 {
 public:
   vtkTypeMacro(vtkConsoleOutputWindow, vtkOutputWindow);
   static vtkConsoleOutputWindow* New();
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-  void DisplayText(const char*) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-  void DisplayText(const char*);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
+  void DisplayText(const char*) VTK_DICOM_OVERRIDE;
   static void Install();
 
 protected:
@@ -43,12 +39,12 @@ protected:
   void Initialize();
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkConsoleOutputWindow(const vtkConsoleOutputWindow&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkConsoleOutputWindow&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkConsoleOutputWindow(const vtkConsoleOutputWindow&) VTK_DICOM_DELETE;
+  void operator=(const vtkConsoleOutputWindow&) VTK_DICOM_DELETE;
 #else
-  vtkConsoleOutputWindow(const vtkConsoleOutputWindow&);
-  void operator=(const vtkConsoleOutputWindow&);
+  vtkConsoleOutputWindow(const vtkConsoleOutputWindow&) = delete;
+  void operator=(const vtkConsoleOutputWindow&) = delete;
 #endif
 };
 

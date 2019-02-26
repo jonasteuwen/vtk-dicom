@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -14,9 +14,10 @@
 #ifndef vtkDICOMGenerator_h
 #define vtkDICOMGenerator_h
 
-#include <vtkObject.h>
-#include <vtkStdString.h> // For std::string
+#include "vtkObject.h"
+#include "vtkStdString.h" // For std::string
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
 #include "vtkDICOMTag.h" // For method parameter
 
 class vtkIntArray;
@@ -48,11 +49,7 @@ public:
   vtkTypeMacro(vtkDICOMGenerator, vtkObject);
 
   //! Print information about this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
 
   //@{
   //! Generate an instance of one of the supported classes.
@@ -123,6 +120,17 @@ public:
   vtkGetMacro(RescaleIntercept, double);
   vtkSetMacro(RescaleSlope, double);
   vtkGetMacro(RescaleSlope, double);
+  //@}
+
+  //@{
+  //! Set the number of overlays to generate.
+  /*!
+   *  This will cause overlay attributes to be copied from the source
+   *  meta data to the output meta data.  It is up to the writer to
+   *  ensure that the values are consistent with each other.
+   */
+  vtkSetMacro(NumberOfOverlays, int);
+  vtkGetMacro(NumberOfOverlays, int);
   //@}
 
   //@{
@@ -410,6 +418,9 @@ protected:
   double RescaleIntercept;
   double RescaleSlope;
 
+  //! The number of overlays to generate.
+  int NumberOfOverlays;
+
   //! The VTK scalar type of the data, set by InitializeMetaData().
   int ScalarType;
 
@@ -470,12 +481,12 @@ protected:
   vtkIntArray *RangeArray;
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMGenerator(const vtkDICOMGenerator&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMGenerator&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMGenerator(const vtkDICOMGenerator&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMGenerator&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMGenerator(const vtkDICOMGenerator&);
-  void operator=(const vtkDICOMGenerator&);
+  vtkDICOMGenerator(const vtkDICOMGenerator&) = delete;
+  void operator=(const vtkDICOMGenerator&) = delete;
 #endif
 };
 

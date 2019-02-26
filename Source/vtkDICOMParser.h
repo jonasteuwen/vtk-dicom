@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -14,9 +14,11 @@
 #ifndef vtkDICOMParser_h
 #define vtkDICOMParser_h
 
-#include <vtkObject.h>
-#include <vtkStdString.h> // For std::string
+#include "vtkObject.h"
+#include "vtkStdString.h" // For std::string
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
+#include "vtkDICOMCharacterSet.h" // For character sets
 
 class vtkDICOMFile;
 class vtkDICOMItem;
@@ -42,11 +44,7 @@ public:
   vtkTypeMacro(vtkDICOMParser, vtkObject);
 
   //! Print a summary of the contents of this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
 
   //@{
   //! Set the file name.
@@ -64,6 +62,34 @@ public:
   //! Set the instance index to use when storing metadata.
   vtkSetMacro(Index, int);
   int GetIndex() { return this->Index; }
+  //@}
+
+  //@{
+  //! Set the character set to use if SpecificCharacterSet is missing.
+  /*!
+   *  Some DICOM files do not list a SpecificCharacterSet attribute, but
+   *  nevertheless use a non-ASCII character encoding.  This method can be
+   *  used to specify the character set in absence of SpecificCharacterSet.
+   *  If SpecificCharacterSet is present, the default will not override it
+   *  unless OverrideCharacterSet is true.
+   */
+  void SetDefaultCharacterSet(vtkDICOMCharacterSet cs);
+  vtkDICOMCharacterSet GetDefaultCharacterSet() {
+    return this->DefaultCharacterSet; }
+
+  //! Override the value stored in SpecificCharacterSet.
+  /*!
+   *  This method can be used if the SpecificCharacterSet attribute of a
+   *  file is incorrect.  It overrides the SpecificCharacterSet with the
+   *  DefaultCharacterSet.
+   */
+  void SetOverrideCharacterSet(bool b);
+  void OverrideCharacterSetOn() {
+    this->SetOverrideCharacterSet(true); }
+  void OverrideCharacterSetOff() {
+    this->SetOverrideCharacterSet(false); }
+  bool GetOverrideCharacterSet() {
+    return this->OverrideCharacterSet; }
   //@}
 
   //@{
@@ -155,6 +181,22 @@ protected:
   virtual bool FillBuffer(
     const unsigned char* &cp, const unsigned char* &ep);
 
+  //! Internal method to advance the buffer to a new file position.
+  /*!
+   *  This will move to a new position within the file.
+   */
+  virtual bool SeekBuffer(
+    const unsigned char* &cp, const unsigned char* &ep, vtkTypeInt64 offset);
+
+  //! Internal method for skipping over a value.
+  /*!
+   *  This is for skipping over bulk data (such as PixelData).
+   *  If vl is 0xffffffff, then the value will be assumed to be
+   *  delimited (e.g. encapsulated pixel data).
+   */
+  virtual bool SkipValue(
+    const unsigned char* &cp, const unsigned char* &ep, unsigned int vl);
+
   //! Get the bytes remaining in the file.
   virtual vtkTypeInt64 GetBytesRemaining(
     const unsigned char *cp, const unsigned char *ep);
@@ -200,18 +242,20 @@ protected:
   unsigned int PixelDataVL;
   bool PixelDataFound;
   bool QueryMatched;
+  vtkDICOMCharacterSet DefaultCharacterSet;
+  bool OverrideCharacterSet;
   unsigned long ErrorCode;
 
   // used to share FillBuffer with internal classes
   friend class vtkDICOMParserInternalFriendship;
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMParser(const vtkDICOMParser&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMParser&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMParser(const vtkDICOMParser&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMParser&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMParser(const vtkDICOMParser&);
-  void operator=(const vtkDICOMParser&);
+  vtkDICOMParser(const vtkDICOMParser&) = delete;
+  void operator=(const vtkDICOMParser&) = delete;
 #endif
 };
 

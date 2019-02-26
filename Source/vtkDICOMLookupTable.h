@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2016 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -11,19 +11,21 @@
      PURPOSE.  See the above copyright notice for more information.
 
 =========================================================================*/
-/*! \class vtkDICOMLookupTable
- *  \brief Lookup tables from DICOM data.
+/**
+ * \class vtkDICOMLookupTable
+ * \brief Lookup tables from DICOM data.
  *
- *  This class can create VTK lookup tables from the information in a
- *  DICOM data set.  Lookup tables can be created from a palette LUT,
- *  or from standard DICOM LUTs such as HOT_IRON.
+ * This class can create VTK lookup tables from the information in a
+ * DICOM data set.  Lookup tables can be created from a palette LUT,
+ * or from standard DICOM LUTs such as HOT_IRON.
  */
 
 #ifndef vtkDICOMLookupTable_h
 #define vtkDICOMLookupTable_h
 
-#include <vtkLookupTable.h>
+#include "vtkLookupTable.h"
 #include "vtkDICOMModule.h" // For export macro
+#include "vtkDICOMConfig.h" // For configuration details
 
 class vtkDICOMMetaData;
 
@@ -36,11 +38,7 @@ public:
   vtkTypeMacro(vtkDICOMLookupTable, vtkLookupTable);
 
   //! Print information about this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
 
   //! Build the a standard lookup table, given a code string.
   /*!
@@ -71,12 +69,12 @@ protected:
     unsigned char *lut, unsigned int stride, unsigned int count);
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMLookupTable(const vtkDICOMLookupTable&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMLookupTable&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMLookupTable(const vtkDICOMLookupTable&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMLookupTable&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMLookupTable(const vtkDICOMLookupTable&);
-  void operator=(const vtkDICOMLookupTable&);
+  vtkDICOMLookupTable(const vtkDICOMLookupTable&) = delete;
+  void operator=(const vtkDICOMLookupTable&) = delete;
 #endif
 };
 

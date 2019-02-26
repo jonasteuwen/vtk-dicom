@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2016 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -11,12 +11,13 @@
      PURPOSE.  See the above copyright notice for more information.
 
 =========================================================================*/
-/*! \class vtkDICOMCTRectifier
- *  \brief Prepare a CT for 3D processing
+/**
+ * \class vtkDICOMCTRectifier
+ * \brief Prepare a CT for 3D processing
  *
- *  This class will identify gantry-tilted CT images and resample them
- *  into a rectangular volume.  This is often a necessary step prior to
- *  volume rendering or other forms of 3D rendering.
+ * This class will identify gantry-tilted CT images and resample them
+ * into a rectangular volume.  This is often a necessary step prior to
+ * volume rendering or other forms of 3D rendering.
  */
 
 #ifndef vtkDICOMCTRectifier_h
@@ -36,11 +37,18 @@ public:
   vtkTypeMacro(vtkDICOMCTRectifier, vtkDICOMAlgorithm);
 
   //! Print information about this object.
-#ifdef VTK_OVERRIDE
-  void PrintSelf(ostream& os, vtkIndent indent) VTK_OVERRIDE;
-#else
-  void PrintSelf(ostream& os, vtkIndent indent);
-#endif
+  void PrintSelf(ostream& os, vtkIndent indent) VTK_DICOM_OVERRIDE;
+
+  //@{
+  //! Interpolation constants.
+  enum
+  {
+    Nearest,
+    Linear,
+    Cubic,
+    WindowedSinc
+  };
+  //@}
 
   //@{
   //! Reverse the default operation.
@@ -63,6 +71,25 @@ public:
    */
   void SetVolumeMatrix(vtkMatrix4x4 *matrix);
   vtkMatrix4x4 *GetVolumeMatrix() { return this->VolumeMatrix; }
+  //@}
+
+  //@{
+  //! Set the interpolation method for resampling the data.
+  /*!
+   *  The default interpolation method is WindowedSinc, which gives the
+   *  highest quality output.  Linear interpolation is much faster and
+   *  will give satisfactory results in most situations.
+   */
+  void SetInterpolationMode(int t);
+  void SetInterpolationModeToNearest() {
+    this->SetInterpolationMode(Nearest); }
+  void SetInterpolationModeToLinear() {
+    this->SetInterpolationMode(Linear); }
+  void SetInterpolationModeToCubic() {
+    this->SetInterpolationMode(Cubic); }
+  void SetInterpolationModeToWindowedSinc() {
+    this->SetInterpolationMode(WindowedSinc); }
+  int GetInterpolationMode() { return this->InterpolationMode; }
   //@}
 
   //@{
@@ -105,54 +132,36 @@ protected:
     const double matrix[16], const int extent[6], double spacing[3],
     double origin[3]);
 
-#ifdef VTK_OVERRIDE
   int RequestInformation(
     vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector) VTK_OVERRIDE;
+    vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
 
   int RequestUpdateExtent(
     vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector) VTK_OVERRIDE;
+    vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
 
   int RequestData(
     vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector) VTK_OVERRIDE;
+    vtkInformationVector* outputVector) VTK_DICOM_OVERRIDE;
 
   void ThreadedRequestData(
     vtkInformation *request, vtkInformationVector **inputVector,
     vtkInformationVector *outputVector, vtkImageData ***inData,
-    vtkImageData **outData, int ext[6], int id) VTK_OVERRIDE;
-#else
-  int RequestInformation(
-    vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector);
-
-  int RequestUpdateExtent(
-    vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector);
-
-  int RequestData(
-    vtkInformation* request, vtkInformationVector** inputVector,
-    vtkInformationVector* outputVector);
-
-  void ThreadedRequestData(
-    vtkInformation *request, vtkInformationVector **inputVector,
-    vtkInformationVector *outputVector, vtkImageData ***inData,
-    vtkImageData **outData, int ext[6], int id);
-#endif
+    vtkImageData **outData, int ext[6], int id) VTK_DICOM_OVERRIDE;
 
   vtkMatrix4x4 *VolumeMatrix;
   vtkMatrix4x4 *RectifiedMatrix;
   vtkMatrix4x4 *Matrix;
   int Reverse;
+  int InterpolationMode;
 
 private:
-#ifdef VTK_DELETE_FUNCTION
-  vtkDICOMCTRectifier(const vtkDICOMCTRectifier&) VTK_DELETE_FUNCTION;
-  void operator=(const vtkDICOMCTRectifier&) VTK_DELETE_FUNCTION;
+#ifdef VTK_DICOM_DELETE
+  vtkDICOMCTRectifier(const vtkDICOMCTRectifier&) VTK_DICOM_DELETE;
+  void operator=(const vtkDICOMCTRectifier&) VTK_DICOM_DELETE;
 #else
-  vtkDICOMCTRectifier(const vtkDICOMCTRectifier&);
-  void operator=(const vtkDICOMCTRectifier&);
+  vtkDICOMCTRectifier(const vtkDICOMCTRectifier&) = delete;
+  void operator=(const vtkDICOMCTRectifier&) = delete;
 #endif
 };
 

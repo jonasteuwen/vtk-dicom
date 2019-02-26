@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2016 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -16,8 +16,8 @@
 #include "vtkDICOMFile.h"
 #include "vtkDICOMUtilities.h"
 
-#include <vtkObjectFactory.h>
-#include <vtkStringArray.h>
+#include "vtkObjectFactory.h"
+#include "vtkStringArray.h"
 
 #include <string.h>
 
@@ -268,7 +268,7 @@ void vtkConvertRandomToUUID(const unsigned char bytes[16], char *uuid)
 // convert a 36-character uuid to a 44-character uid
 void vtkConvertUUIDToUID(const char *uuid, char *uid)
 {
-  strncpy(uid, "2.25.", 5);
+  memcpy(uid, "2.25.", 5);
   vtkConvertHexToDecimal(uuid, uid + 5);
 }
 

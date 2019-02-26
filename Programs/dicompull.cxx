@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2016 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -29,8 +29,8 @@
 #include "readquery.h"
 #include "progress.h"
 
-#include <vtkStringArray.h>
-#include <vtkSmartPointer.h>
+#include "vtkStringArray.h"
+#include "vtkSmartPointer.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -46,7 +46,7 @@ void dicompull_version(FILE *file, const char *cp)
 {
   fprintf(file, "%s %s\n", cp, DICOM_VERSION);
   fprintf(file, "\n"
-    "Copyright (c) 2012-2016, David Gobbi.\n\n"
+    "Copyright (c) 2012-2019, David Gobbi.\n\n"
     "This software is distributed under an open-source license.  See the\n"
     "Copyright.txt file that comes with the vtk-dicom source distribution.\n");
 }
@@ -57,19 +57,21 @@ void dicompull_usage(FILE *file, const char *cp)
   fprintf(file, "usage:\n"
     "  %s [options] <directory> ...\n\n", cp);
   fprintf(file, "options:\n"
-    "  -L              Follow symbolic links (default).\n"
-    "  -P              Do not follow symbolic links.\n"
-    "  -k tag=value    Provide an attribute to be queried and matched.\n"
-    "  -q <query.txt>  Provide a file to describe the find query.\n"
-    "  -u <uids.txt>   Provide a file that contains a list of UIDs.\n"
-    "  -o <directory>  Directory to place the files into.\n"
-    "  -maxdepth n     Set the maximum directory depth.\n"
-    "  -name pattern   Set file names to match (with \"*\" or \"?\").\n"
-    "  -image          Restrict the search to files with PixelData.\n"
-    "  -series         Find all files in series if even one file matches.\n"
-    "  --silent        Do not report any progress information.\n"
-    "  --help          Print a brief help message.\n"
-    "  --version       Print the software version.\n"
+    "  -L                Follow symbolic links (default).\n"
+    "  -P                Do not follow symbolic links.\n"
+    "  -k tag=value      Provide an attribute to be queried and matched.\n"
+    "  -q <query.txt>    Provide a file to describe the find query.\n"
+    "  -u <uids.txt>     Provide a file that contains a list of UIDs.\n"
+    "  -o <directory>    Directory to place the files into.\n"
+    "  -maxdepth n       Set the maximum directory depth.\n"
+    "  -name pattern     Set file names to match (with \"*\" or \"?\").\n"
+    "  -image            Restrict the search to files with PixelData.\n"
+    "  -series           Find all files in series if even one file matches.\n"
+    "  --ignore-dicomdir Ignore the DICOMDIR file even if it is present.\n"
+    "  --charset <cs>    Charset to use if SpecificCharacterSet is missing.\n"
+    "  --silent          Do not report any progress information.\n"
+    "  --help            Print a brief help message.\n"
+    "  --version         Print the software version.\n"
     );
 }
 
@@ -84,11 +86,6 @@ void dicompull_help(FILE *file, const char *cp)
     "naming those attributes within curly braces.  For example, consider\n"
     "\"{PatientID}/{StudyDescription}/{SeriesDescription}-{SeriesNumber}\"\n"
     "or something similar to produce a hierarchichal directory structure.\n"
-    "The attributes used in the path should be from the following list:\n"
-    "  PatientID, PatientName, PatientBirthDate, PatientSex,\n"
-    "  StudyID, StudyDescription, StudyDate, StudyTime, StudyInstanceUID,\n"
-    "  SeriesNumber, SeriesDescription, SeriesInstanceUID,\n"
-    "  Modality, AccessionNumber.\n"
     "\n"
     "The files to be copied are specified with search keys, which take the\n"
     "form \"-k key=value\" where keys can either use the standard names given\n"
@@ -192,13 +189,52 @@ std::string dicompull_basedir(const char *outdir)
   return s;
 }
 
-std::string dicompull_makedirname(
-  vtkDICOMDirectory *finder, int study, int series, const char *outdir)
+void dicompull_checktags(
+  vtkDICOMItem *query, QueryTagList *qtlist, const char *outdir)
+{
+  std::string keytext;
+  const char *cp = outdir;
+  const char *bp = 0;
+  while (*cp != '\0')
+  {
+    while (*cp != '{' && *cp != '}' && *cp != '\0') { cp++; }
+    if (*cp == '}')
+    {
+      fprintf(stderr, "Error: Missing \'{\': %s\n", outdir);
+      exit(1);
+    }
+    if (*cp == '{')
+    {
+      cp++;
+      bp = cp;
+      while (*cp != '}' && *cp != '\0') { cp++; }
+      if (*cp != '}')
+      {
+        fprintf(stderr, "Error: Unmatched \'{\': %s\n", outdir);
+        exit(1);
+      }
+      else
+      {
+        keytext.assign(bp, cp);
+        cp++;
+
+        if (!dicomcli_readkey(keytext.c_str(), query, qtlist))
+        {
+          exit(1);
+        }
+      }
+    }
+  }
+}
+
+std::string dicompull_makedirname(vtkDICOMMetaData *meta, const char *outdir)
 {
   std::string s;
-  std::string key;
+  std::string keytext;
   std::string val;
   vtkDICOMValue v;
+  vtkDICOMItem query;
+  QueryTagList qtlist;
 
   const char *cp = outdir;
   const char *dp = cp;
@@ -224,48 +260,22 @@ std::string dicompull_makedirname(
       {
         s.append(dp, bp);
         bp++;
-        key.assign(bp, cp);
+        keytext.assign(bp, cp);
         cp++;
         dp = cp;
-        v.Clear();
-        vtkDICOMTag tag;
-        if (key.length() > 0)
+
+        if (!dicomcli_readkey(keytext.c_str(), &query, &qtlist, false))
         {
-          vtkDICOMDictEntry de = vtkDICOMDictionary::FindDictEntry(key.c_str());
-          if (de.IsValid())
-          {
-            tag = de.GetTag();
-          }
-          else
-          {
-            fprintf(stderr, "Error: Unrecognized key %s\n", key.c_str());
-            exit(1);
-          }
+          exit(1);
         }
-        if (finder)
-        {
-          if (!v.IsValid())
-          {
-            v = finder->GetStudyRecord(study).GetAttributeValue(tag);
-          }
-          if (!v.IsValid())
-          {
-            v = finder->GetPatientRecordForStudy(study).GetAttributeValue(tag);
-          }
-          if (!v.IsValid())
-          {
-            v = finder->GetSeriesRecord(series).GetAttributeValue(tag);
-          }
-        }
+
+        const vtkDICOMTagPath& tagpath = qtlist.back();
+
+        val.clear();
+        v = meta->Get(tagpath);
         if (v.IsValid())
         {
           val.assign(dicompull_cleanup(v.AsUTF8String()));
-        }
-        else if (finder)
-        {
-          fprintf(stderr, "Error: Key %s not allowed in output directory.\n",
-                  key.c_str());
-          exit(1);
         }
         if (val.empty())
         {
@@ -297,19 +307,19 @@ int MAINMACRO(int argc, char *argv[])
   vtkDICOMItem query;
   bool requirePixelData = false;
   bool findSeries = false;
+  bool ignoreDicomdir = false;
+  vtkDICOMCharacterSet charset;
   bool silent = false;
   std::string outdir;
 
   vtkSmartPointer<vtkStringArray> a = vtkSmartPointer<vtkStringArray>::New();
 
   // always query SpecificCharacterSet
-  query.SetAttributeValue(DC::SpecificCharacterSet, vtkDICOMValue(VR::CS));
+  query.Set(DC::SpecificCharacterSet, vtkDICOMValue(VR::CS));
 
   // always query the functional sequences for advanced files
-  query.SetAttributeValue(
-    DC::SharedFunctionalGroupsSequence, vtkDICOMValue(VR::SQ));
-  query.SetAttributeValue(
-    DC::PerFrameFunctionalGroupsSequence, vtkDICOMValue(VR::SQ));
+  query.Set(DC::SharedFunctionalGroupsSequence, vtkDICOMValue(VR::SQ));
+  query.Set(DC::PerFrameFunctionalGroupsSequence, vtkDICOMValue(VR::SQ));
 
   if (argc < 2)
   {
@@ -423,6 +433,27 @@ int MAINMACRO(int argc, char *argv[])
     {
       findSeries = true;
     }
+    else if (strcmp(arg, "--ignore-dicomdir") == 0)
+    {
+      ignoreDicomdir = true;
+    }
+    else if (strcmp(arg, "--charset") == 0)
+    {
+      ++argi;
+      if (argi == argc || argv[argi][0] == '-')
+      {
+        fprintf(stderr, "%s must be followed by a valid character set\n\n",
+                arg);
+        return 1;
+      }
+      charset = vtkDICOMCharacterSet(argv[argi]);
+      if (charset.GetKey() == vtkDICOMCharacterSet::Unknown)
+      {
+        fprintf(stderr, "%s %s is not a known character set\n\n",
+                arg, argv[argi]);
+        return 1;
+      }
+    }
     else if (strcmp(arg, "--silent") == 0)
     {
       silent = true;
@@ -463,7 +494,7 @@ int MAINMACRO(int argc, char *argv[])
   }
 
   // check that the outdir string is valid
-  dicompull_makedirname(NULL, 0, 0, outdir.c_str());
+  dicompull_checktags(&query, NULL, outdir.c_str());
 
   // check that the outdir is writable
   std::string basedir = dicompull_basedir(outdir.c_str());
@@ -514,10 +545,12 @@ int MAINMACRO(int argc, char *argv[])
 
     vtkSmartPointer<vtkDICOMDirectory> finder =
       vtkSmartPointer<vtkDICOMDirectory>::New();
+    finder->SetDefaultCharacterSet(charset);
     finder->SetInputFileNames(a);
     finder->SetFilePattern(pattern);
     finder->SetScanDepth(scandepth);
     finder->SetFindQuery(query);
+    finder->SetIgnoreDicomdir(ignoreDicomdir);
     finder->SetFollowSymlinks(followSymlinks);
     finder->SetRequirePixelData(requirePixelData);
     finder->SetFindLevel(
@@ -554,9 +587,9 @@ int MAINMACRO(int argc, char *argv[])
       for (int k = k0; k <= k1; k++)
       {
         vtkStringArray *sa = finder->GetFileNamesForSeries(k);
+        vtkDICOMMetaData *meta = finder->GetMetaDataForSeries(k);
         // create the directory name
-        std::string dirname =
-          dicompull_makedirname(finder, j, k, outdir.c_str());
+        std::string dirname = dicompull_makedirname(meta, outdir.c_str());
         std::map<std::string,int>::iterator mi = dircount.find(dirname);
         int si = 1;
         if (mi != dircount.end())
@@ -570,7 +603,7 @@ int MAINMACRO(int argc, char *argv[])
           int code = vtkDICOMFileDirectory::Create(dirname.c_str());
           if (code != vtkDICOMFileDirectory::Good)
           {
-            fprintf(stderr, "Error: Cannot create directory: %s\n",
+            fprintf(stderr, "Error: Cannot create directory: %s\n\n",
                     dirname.c_str());
             delete [] buffer;
             exit(1);
@@ -589,7 +622,7 @@ int MAINMACRO(int argc, char *argv[])
             vtkDICOMFile infile(srcname.c_str(), vtkDICOMFile::In);
             if (infile.GetError())
             {
-              const char *message = "Cannot copy file";
+              const char *message = "Missing file";
               switch (infile.GetError())
               {
                 case vtkDICOMFile::AccessDenied:
@@ -602,11 +635,13 @@ int MAINMACRO(int argc, char *argv[])
                   message = "Bad file path";
                   break;
               }
-              fprintf(stderr, "Error: %s: %s\n", message, srcname.c_str());
+              dicomcli_error_helper(finder->GetMetaDataForSeries(k), i);
+              fprintf(stderr, "Error: %s: %s\n\n", message, srcname.c_str());
             }
             else if (infile.GetSize() == 0)
             {
-              fprintf(stderr, "Error: File size is zero: %s\n",
+              dicomcli_error_helper(finder->GetMetaDataForSeries(k), i);
+              fprintf(stderr, "Error: File size is zero: %s\n\n",
                       srcname.c_str());
             }
             else
@@ -627,7 +662,7 @@ int MAINMACRO(int argc, char *argv[])
                     message = "Bad file path";
                     break;
                 }
-                fprintf(stderr, "Error: %s: %s\n", message, fullname.c_str());
+                fprintf(stderr, "Error: %s: %s\n\n", message, fullname.c_str());
               }
               else
               {
@@ -637,7 +672,8 @@ int MAINMACRO(int argc, char *argv[])
                   size_t bytecount = infile.Read(buffer, bufsize);
                   if (bytecount == 0 && infile.GetError())
                   {
-                    fprintf(stderr, "Error, incomplete read: %s\n",
+                    dicomcli_error_helper(finder->GetMetaDataForSeries(k), i);
+                    fprintf(stderr, "Error, incomplete read: %s\n\n",
                             srcname.c_str());
                     vtkDICOMFile::Remove(fullname.c_str());
                     break;
@@ -645,7 +681,7 @@ int MAINMACRO(int argc, char *argv[])
                   if (bytecount > 0 &&
                       outfile.Write(buffer, bytecount) != bytecount)
                   {
-                    fprintf(stderr, "Error: Incomplete write: %s\n",
+                    fprintf(stderr, "Error: Incomplete write: %s\n\n",
                             fullname.c_str());
                     vtkDICOMFile::Remove(fullname.c_str());
                     break;

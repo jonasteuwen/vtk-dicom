@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -16,8 +16,8 @@
 #include "vtkDICOMSequence.h"
 #include "vtkDICOMUtilities.h"
 
-#include <vtkMath.h>
-#include <vtkTypeTraits.h>
+#include "vtkMath.h"
+#include "vtkTypeTraits.h"
 
 #include <math.h>
 #include <float.h>
@@ -26,6 +26,9 @@
 #include <assert.h>
 
 #include <new>
+#include <streambuf>
+#include <limits>
+#include <locale>
 
 // For use by methods that must return an empty item
 const vtkDICOMItem vtkDICOMValue::EmptyItem;
@@ -49,44 +52,64 @@ bool IsHexDigit(char c)
           (c >= 'a' && c <= 'f'));
 }
 
+// Buffer for reading from character string
+class InputString : public std::streambuf
+{
+public:
+  InputString(const char *ccp, size_t l) {
+    char *cp = const_cast<char *>(ccp);
+    setg(cp, cp, cp+l);
+  }
+};
+
+// Buffer for writing to a character string
+class OutputString : public std::streambuf
+{
+public:
+  OutputString(char *cp, size_t l) {
+    setp(cp, cp+l);
+  }
+  size_t length() const { return pptr() - pbase(); }
+  void adjust(int n) { pbump(n); }
+};
+
 // The input is a list of one or more numerical string values separated
 // by backslashes, for example "1.23435\85234.0\2345.22".  Convert "n"
 // values to type OT, starting at the "i"th backslash-separated value.
-// If the VR is IS (integer string) then use strol(), if DS use strtod().
 template<class OT>
 void StringConversion(
   const char *cp, vtkDICOMVR vr, OT *v, size_t i, size_t n)
 {
   if (vr == vtkDICOMVR::IS || vr == vtkDICOMVR::DS)
   {
-    for (size_t j = 0; j < i && *cp != '\0'; j++)
+    // create a stream for conversion with "C" locale
+    InputString sb(cp, strlen(cp));
+    std::istream sbs(&sb);
+    sbs.imbue(std::locale::classic());
+
+    for (size_t j = 0; j < i && !sbs.eof(); j++)
     {
-      bool bk = false;
-      do
-      {
-        bk = (*cp == '\\');
-        cp++;
-      }
-      while (!bk && *cp != '\0');
+      sbs.ignore(std::numeric_limits<std::streamsize>::max(), '\\');
     }
 
-    for (size_t k = 0; k < n && *cp != '\0'; k++)
+    for (size_t k = 0; k < n && !sbs.eof(); k++)
     {
       if (vr == vtkDICOMVR::DS)
       {
-        *v++ = static_cast<OT>(strtod(cp, NULL));
+        double d = 0.0;
+        sbs >> d;
+        *v++ = static_cast<OT>(d);
       }
       else
       {
-        *v++ = static_cast<OT>(strtol(cp, NULL, 10));
+        int d = 0;
+        sbs >> d;
+        *v++ = static_cast<OT>(d);
       }
-      bool bk = false;
-      do
+      if (k + 1 < n)
       {
-        bk = (*cp == '\\');
-        cp++;
+        sbs.ignore(std::numeric_limits<std::streamsize>::max(), '\\');
       }
-      while (!bk && *cp != '\0');
     }
   }
   else if (n > 0)
@@ -100,13 +123,22 @@ void StringConversionAT(const char *cp, vtkDICOMTag *v, size_t n)
 {
   for (size_t k = 0; k < n && *cp != '\0'; k++)
   {
-    while (!IsHexDigit(*cp) && *cp != '\\' && *cp != '\0')  { cp++; }
-    const char *dp = cp;
-    while (IsHexDigit(*dp)) { dp++; }
-    while (!IsHexDigit(*dp) && *dp != '\\' && *dp != '\0')  { dp++; }
-    unsigned short g = static_cast<unsigned short>(strtol(cp, NULL, 16));
-    unsigned short e = static_cast<unsigned short>(strtol(dp, NULL, 16));
-    *v++ = vtkDICOMTag(g, e);
+    unsigned short tag[2] = { 0, 0 };
+    for (int j = 0; j < 2; j++)
+    {
+      while (!IsHexDigit(*cp) && *cp != '\\' && *cp != '\0')  { cp++; }
+      for (int i = 0; i < 4; i++)
+      {
+        unsigned short d;
+        if (*cp >= '0' && *cp <= '9') { d = *cp - '0'; }
+        else if (*cp >= 'A' && *cp <= 'F') { d = *cp - ('A' - 10); }
+        else if (*cp >= 'a' && *cp <= 'f') { d = *cp - ('a' - 10); }
+        else { break; }
+        tag[j] = tag[j]*16 + d;
+        cp++;
+      }
+    }
+    *v++ = vtkDICOMTag(tag[0], tag[1]);
 
     bool bk = false;
     do
@@ -358,6 +390,17 @@ unsigned int *vtkDICOMValue::AllocateUnsignedIntData(
   return this->Allocate<unsigned int>(vr, vn);
 }
 
+long long *vtkDICOMValue::AllocateInt64Data(vtkDICOMVR vr, size_t vn)
+{
+  return this->Allocate<long long>(vr, vn);
+}
+
+unsigned long long *vtkDICOMValue::AllocateUnsignedInt64Data(
+  vtkDICOMVR vr, size_t vn)
+{
+  return this->Allocate<unsigned long long>(vr, vn);
+}
+
 float *vtkDICOMValue::AllocateFloatData(vtkDICOMVR vr, size_t vn)
 {
   return this->Allocate<float>(vr, vn);
@@ -482,6 +525,16 @@ void vtkDICOMValue::CreateValue(vtkDICOMVR vr, const T *data, size_t n)
     float *ptr = this->AllocateFloatData(vr, n);
     NumericalConversion(data, ptr, n);
   }
+  else if (vr == VR::UV)
+  {
+    unsigned long long *ptr = this->AllocateUnsignedInt64Data(vr, n);
+    NumericalConversion(data, ptr, n);
+  }
+  else if (vr == VR::SV)
+  {
+    long long *ptr = this->AllocateInt64Data(vr, n);
+    NumericalConversion(data, ptr, n);
+  }
   else if (vr == VR::UL)
   {
     unsigned int *ptr = this->AllocateUnsignedIntData(vr, n);
@@ -505,7 +558,11 @@ void vtkDICOMValue::CreateValue(vtkDICOMVR vr, const T *data, size_t n)
   else if (vr == VR::DS)
   {
     char *cp = this->AllocateCharData(vr, 17*n);
-    char *dp = cp;
+    OutputString sb(cp, 17*n);
+    std::ostream sbs(&sb);
+    sbs.imbue(std::locale::classic());
+    sbs.precision(10);
+
     for (size_t i = 0; i < n; i++)
     {
       double d = static_cast<double>(data[i]);
@@ -522,49 +579,47 @@ void vtkDICOMValue::CreateValue(vtkDICOMVR vr, const T *data, size_t n)
       {
         d = 0.0;
       }
-      // use a precision that will use 16 characters maximum
-      sprintf(cp, "%.10g", d);
-      size_t dl = strlen(cp);
-      // look for extra leading zeros on exponent
-      if (dl >= 5 && (cp[dl-5] == 'e' || cp[dl-5] =='E') && cp[dl-3] == '0')
+      sbs << d;
+      size_t dl = sb.length();
+      // look for superfluous leading zero on 3-digit exponent,
+      // this occurs for MSVC prior to MSVC 2015, and possibly
+      // for compilers that mimic MSVC behavior
+      if (dl >= 5 && (cp[dl-5] == 'e' || cp[dl-5] =='E') &&
+          cp[dl-3] == '0' &&
+          cp[dl-2] >= '0' && cp[dl-2] <= '9' &&
+          cp[dl-1] >= '0' && cp[dl-1] <= '9')
       {
         cp[dl-3] = cp[dl-2];
         cp[dl-2] = cp[dl-1];
-        cp[dl-1] = '\0';
-        dl--;
+        sb.adjust(-1);
       }
-      cp += dl;
-      *cp++ = '\\';
+      if (i + 1 < n) { sbs.put('\\'); }
     }
-    if (cp != dp) { --cp; }
+
+    // pad to even length and terminate
+    if (sb.length() & 1) { sbs.put(' '); }
+    sbs.put('\0');
     this->V->NumberOfValues = static_cast<unsigned int>(n);
-    this->V->VL = static_cast<unsigned int>(cp - dp);
-    if (this->V->VL & 1)
-    { // pad to even number of chars
-      *cp++ = ' ';
-      this->V->VL++;
-    }
-    *cp = '\0';
+    this->V->VL = static_cast<unsigned int>(sb.length()-1);
   }
   else if (vr == VR::IS)
   {
     char *cp = this->AllocateCharData(vr, 13*n);
-    char *dp = cp;
+    OutputString sb(cp, 13*n);
+    std::ostream sbs(&sb);
+    sbs.imbue(std::locale::classic());
+
     for (size_t i = 0; i < n; i++)
     {
-      sprintf(cp, "%i", static_cast<int>(data[i]));
-      cp += strlen(cp);
-      *cp++ = '\\';
+      sbs << static_cast<int>(data[i]);;
+      if (i + 1 < n) { sbs.put('\\'); }
     }
-    if (cp != dp) { --cp; }
+
+    // pad to even length and terminate
+    if (sb.length() & 1) { sbs.put(' '); }
+    sbs.put('\0');
     this->V->NumberOfValues = static_cast<unsigned int>(n);
-    this->V->VL = static_cast<unsigned int>(cp - dp);
-    if (this->V->VL & 1)
-    { // pad to even number of chars
-      *cp++ = ' ';
-      this->V->VL++;
-    }
-    *cp = '\0';
+    this->V->VL = static_cast<unsigned int>(sb.length()-1);
   }
   else if (vr == VR::OB || vr == VR::UN)
   {
@@ -598,6 +653,20 @@ void vtkDICOMValue::CreateValue(vtkDICOMVR vr, const T *data, size_t n)
     else
     {
       unsigned int *ptr = this->AllocateUnsignedIntData(vr, n*sizeof(T)/4);
+      memcpy(ptr, data, n*sizeof(T));
+    }
+  }
+  else if (vr == VR::OV)
+  {
+    if (vt == VTK_LONG_LONG)
+    {
+      long long *ptr = this->AllocateInt64Data(vr, n);
+      memcpy(ptr, data, n*4);
+    }
+    else
+    {
+      unsigned long long *ptr =
+        this->AllocateUnsignedInt64Data(vr, n*sizeof(T)/4);
       memcpy(ptr, data, n*sizeof(T));
     }
   }
@@ -710,6 +779,11 @@ void vtkDICOMValue::CreateValue<char>(
     unsigned int *ptr = this->AllocateUnsignedIntData(vr, m/4);
     memcpy(ptr, data, m);
   }
+  else if (vr == VR::OV)
+  {
+    unsigned long long *ptr = this->AllocateUnsignedInt64Data(vr, m/4);
+    memcpy(ptr, data, m);
+  }
   else if (vr == VR::OF)
   {
     float *ptr = this->AllocateFloatData(vr, m/4);
@@ -746,7 +820,7 @@ void vtkDICOMValue::CreateValue<char>(
   {
     int pad = (m & 1);
     char *cp = this->AllocateCharData(vr, m);
-    strncpy(cp, data, m);
+    memcpy(cp, data, m);
     // if not UI, then pad to even length with a space
     if (pad && vr != VR::UI) { cp[m++] = ' '; }
     cp[m] = '\0';
@@ -761,6 +835,16 @@ void vtkDICOMValue::CreateValue<char>(
   {
     float *ptr = this->AllocateFloatData(vr, n);
     StringConversion(data, VR::DS, ptr, 0, n);
+  }
+  else if (vr == VR::UV)
+  {
+    unsigned long long *ptr = this->AllocateUnsignedInt64Data(vr, n);
+    StringConversion(data, VR::IS, ptr, 0, n);
+  }
+  else if (vr == VR::SV)
+  {
+    long long *ptr = this->AllocateInt64Data(vr, n);
+    StringConversion(data, VR::IS, ptr, 0, n);
   }
   else if (vr == VR::UL)
   {
@@ -890,7 +974,7 @@ void vtkDICOMValue::CreateValueWithSpecificCharacterSet(
   {
     this->V->CharacterSet = cs.GetKey();
     // character set might change interpretation of backslashes
-    if (cs.GetKey() > vtkDICOMCharacterSet::ISO_IR_192)
+    if (l > 0 && !vr.HasSingleValue())
     {
       this->ComputeNumberOfValuesForCharData();
     }
@@ -907,6 +991,103 @@ vtkDICOMValue::vtkDICOMValue(
   vtkDICOMVR vr, vtkDICOMCharacterSet cs, const std::string& v)
 {
   this->CreateValueWithSpecificCharacterSet(vr, cs, v.data(), v.size());
+}
+
+//----------------------------------------------------------------------------
+size_t vtkDICOMValue::CreateValueFromUTF8(
+  vtkDICOMVR vr, vtkDICOMCharacterSet cs, const char *text, size_t l)
+{
+  if (vr.HasSpecificCharacterSet())
+  {
+    std::string s;
+    if (vr.HasSingleValue())
+    {
+      s = cs.FromUTF8(text, l, &l);
+    }
+    else
+    {
+      // convert each value separately
+      const char *cp = text;
+      const char *ep = cp + l;
+      while (cp != ep && *cp != '\0')
+      {
+        const char *dp = cp;
+        if (vr == vtkDICOMVR::PN)
+        {
+          for (; dp != ep && *cp != '\0'; dp++)
+          {
+            if (*dp == '\\' || *dp == '=' || *dp == '^') { break; }
+          }
+        }
+        else
+        {
+          for (; dp != ep && *cp != '\0'; dp++)
+          {
+            if (*dp == '\\') { break; }
+          }
+        }
+        size_t n = dp - cp;
+        if (n > 0)
+        {
+          size_t i;
+          size_t j = s.length();
+          s.append(cs.FromUTF8(cp, n, &i));
+          if (i < n)
+          {
+            // an encoding error occurred, record 1st occurrence
+            i += cp - text;
+            l = (i > l) ? l : i;
+          }
+          size_t k = s.length();
+          while (j < k)
+          {
+            // it is an error for conversion to add a backslash
+            j += cs.NextBackslash(&s[j], &s[k]);
+            if (j < k && s[j] == '\\')
+            {
+              s[j] = '?'; // remove the backslash
+              l = (j > l) ? l : j;
+              j++;
+            }
+          }
+          cp += n;
+        }
+        if (cp != ep && *cp != '\0')
+        {
+          s.append(cp, 1);
+          cp++;
+        }
+      }
+    }
+
+    this->CreateValueWithSpecificCharacterSet(vr, cs, s.data(), s.size());
+    return l;
+  }
+
+  char checkAscii = 0;
+  for (size_t i = 0; i < l; i++)
+  {
+    checkAscii |= text[i];
+  }
+
+  if ((checkAscii & 0x80) != 0)
+  {
+    vtkDICOMCharacterSet csa(vtkDICOMCharacterSet::ISO_IR_6);
+    std::string s = csa.FromUTF8(text, l, &l);
+    this->CreateValue(vr, s.data(), s.size());
+    return l;
+  }
+
+  this->CreateValue(vr, text, l);
+  return l;
+}
+
+vtkDICOMValue vtkDICOMValue::FromUTF8String(
+    vtkDICOMVR vr, vtkDICOMCharacterSet cs, const std::string& s)
+{
+  vtkDICOMValue v;
+  v.CreateValueFromUTF8(vr, cs, s.data(), s.length());
+  return v;
 }
 
 //----------------------------------------------------------------------------
@@ -935,6 +1116,14 @@ vtkDICOMValue::vtkDICOMValue(vtkDICOMVR vr)
   else if (vr == VR::OB || vr == VR::UN)
   {
     this->AllocateUnsignedCharData(vr, 0);
+  }
+  else if (vr == VR::OV || vr == VR::UV)
+  {
+    this->AllocateUnsignedInt64Data(vr, 0);
+  }
+  else if (vr == VR::SV)
+  {
+    this->AllocateInt64Data(vr, 0);
   }
   else if (vr == VR::OL || vr == VR::UL)
   {
@@ -1179,6 +1368,44 @@ const unsigned int *vtkDICOMValue::GetUnsignedIntData() const
     {
       ptr = reinterpret_cast<const unsigned int *>(
         static_cast<const ValueT<int> *>(this->V)->Data);
+    }
+  }
+  return ptr;
+}
+
+const long long *vtkDICOMValue::GetInt64Data() const
+{
+  const long long *ptr = 0;
+  if (this->V)
+  {
+    if (this->V->Type == VTK_LONG_LONG)
+    {
+      ptr = static_cast<const ValueT<long long> *>(this->V)->Data;
+    }
+    else if (this->V->Type == VTK_UNSIGNED_LONG_LONG &&
+             this->V->VR == vtkDICOMVR::OV)
+    {
+      ptr = reinterpret_cast<const long long *>(
+        static_cast<const ValueT<unsigned long long> *>(this->V)->Data);
+    }
+  }
+  return ptr;
+}
+
+const unsigned long long *vtkDICOMValue::GetUnsignedInt64Data() const
+{
+  const unsigned long long *ptr = 0;
+  if (this->V)
+  {
+    if (this->V->Type == VTK_UNSIGNED_LONG_LONG)
+    {
+      ptr = static_cast<const ValueT<unsigned long long> *>(this->V)->Data;
+    }
+    else if (this->V->Type == VTK_LONG_LONG &&
+             this->V->VR == vtkDICOMVR::OV)
+    {
+      ptr = reinterpret_cast<const unsigned long long *>(
+        static_cast<const ValueT<long long> *>(this->V)->Data);
     }
   }
   return ptr;
@@ -1430,6 +1657,26 @@ unsigned int vtkDICOMValue::GetUnsignedInt(size_t i) const
   return v;
 }
 
+long long vtkDICOMValue::GetInt64(size_t i) const
+{
+  long long v = 0;
+  if (this->V && i < this->V->NumberOfValues)
+  {
+    this->GetValuesT(&v, 1, i);
+  }
+  return v;
+}
+
+unsigned long long vtkDICOMValue::GetUnsignedInt64(size_t i) const
+{
+  unsigned long long v = 0;
+  if (this->V && i < this->V->NumberOfValues)
+  {
+    this->GetValuesT(&v, 1, i);
+  }
+  return v;
+}
+
 float vtkDICOMValue::GetFloat(size_t i) const
 {
   float v = 0.0;
@@ -1549,6 +1796,26 @@ unsigned int vtkDICOMValue::AsUnsignedInt() const
   return v;
 }
 
+long long vtkDICOMValue::AsInt64() const
+{
+  long long v = 0;
+  if (this->V && this->V->NumberOfValues >= 1)
+  {
+    this->GetValuesT(&v, 1, 0);
+  }
+  return v;
+}
+
+unsigned long long vtkDICOMValue::AsUnsignedInt64() const
+{
+  unsigned long long v = 0;
+  if (this->V && this->V->NumberOfValues >= 1)
+  {
+    this->GetValuesT(&v, 1, 0);
+  }
+  return v;
+}
+
 float vtkDICOMValue::AsFloat() const
 {
   float v = 0.0;
@@ -1580,7 +1847,7 @@ std::string vtkDICOMValue::AsUTF8String() const
     if (this->V->VR.HasSingleValue())
     {
       while (l > 0 && cp[l-1] == ' ') { l--; }
-      return cs.ConvertToUTF8(cp, l);
+      return cs.ToUTF8(cp, l);
     }
     else
     {
@@ -1593,7 +1860,7 @@ std::string vtkDICOMValue::AsUTF8String() const
         while (n > 0 && *cp == ' ') { cp++; n--; }
         size_t m = n;
         while (m > 0 && cp[m-1] == ' ') { m--; }
-        s.append(cs.ConvertToUTF8(cp, m));
+        s.append(cs.ToUTF8(cp, m));
         cp += n;
         if (cp != ep && *cp == '\\')
         {
@@ -1689,6 +1956,9 @@ void vtkDICOMValue::Substring(
 {
   const char *cp = static_cast<const ValueT<char> *>(this->V)->Data;
   const char *ep = cp + this->V->VL;
+
+  // remove any trailing NULLs for UI values
+  while (ep != cp && ep[-1] == '\0') { --ep; }
   const char *dp = ep;
 
   if (this->V->NumberOfValues > 1 && ++i > 0)
@@ -1727,6 +1997,34 @@ void vtkDICOMValue::Substring(
 }
 
 //----------------------------------------------------------------------------
+void vtkDICOMValue::AppendValueToSafeUTF8String(
+  std::string& str, size_t i) const
+{
+  if (this->V && this->V->Type == VTK_CHAR)
+  {
+    const char *cp = static_cast<const ValueT<char> *>(this->V)->Data;
+    size_t l = this->V->VL;
+    if (this->V->VR.HasSingleValue())
+    {
+      while (l > 0 && cp[l-1] == '\0') { l--; }
+      while (l > 0 && cp[l-1] == ' ') { l--; }
+    }
+    else
+    {
+      const char *dp;
+      this->Substring(i, cp, dp);
+      l = dp - cp;
+    }
+    vtkDICOMCharacterSet cs(this->V->CharacterSet);
+    str += cs.ToSafeUTF8(cp, l);
+  }
+  else
+  {
+    this->AppendValueToString(str, i);
+  }
+}
+
+//----------------------------------------------------------------------------
 void vtkDICOMValue::AppendValueToUTF8String(
   std::string& str, size_t i) const
 {
@@ -1734,13 +2032,20 @@ void vtkDICOMValue::AppendValueToUTF8String(
       this->V->CharacterSet != 0)
   {
     const char *cp = static_cast<const ValueT<char> *>(this->V)->Data;
-    const char *dp = cp + (i == 0 ? this->V->VL : 0);
-    if (!this->V->VR.HasSingleValue())
+    size_t l = this->V->VL;
+    if (this->V->VR.HasSingleValue())
     {
+      while (l > 0 && cp[l-1] == '\0') { l--; }
+      while (l > 0 && cp[l-1] == ' ') { l--; }
+    }
+    else
+    {
+      const char *dp;
       this->Substring(i, cp, dp);
+      l = dp - cp;
     }
     vtkDICOMCharacterSet cs(this->V->CharacterSet);
-    str += cs.ConvertToUTF8(cp, dp-cp);
+    str += cs.ToUTF8(cp, l);
   }
   else
   {
@@ -1775,6 +2080,7 @@ void vtkDICOMValue::AppendValueToString(
       if (this->V->VR.HasSingleValue())
       {
         // strip trailing spaces
+        while (dp != cp && dp[-1] == '\0') { --dp; }
         while (dp != cp && dp[-1] == ' ') { --dp; }
       }
       else
@@ -1828,7 +2134,12 @@ void vtkDICOMValue::AppendValueToString(
     }
     else
     {
+      // create a stream that uses the "C" locale
       char text[32];
+      OutputString sb(text, sizeof(text));
+      std::ostream sbs(&sb);
+      sbs.imbue(std::locale::classic());
+
       // guard against printing non-significant digits:
       // use exponential form if printing in "%f" format
       // would print an integer that is too large for the
@@ -1840,49 +2151,76 @@ void vtkDICOMValue::AppendValueToString(
       {
         if (this->V->Type == VTK_DOUBLE)
         {
-          sprintf(text, "%#.16g", f);
+          sbs.precision(16);
         }
         else
         {
-          sprintf(text, "%#.8g", f);
-        }
-        // make sure there is a zero after the decimal point
-        size_t l = strlen(text);
-        if (l > 0 && text[l-1] == '.')
-        {
-          text[l++] = '0';
-          text[l] = '\0';
+          sbs.precision(8);
         }
       }
       else
       {
+        sbs.setf(std::ios::scientific);
+
         if (this->V->Type == VTK_DOUBLE)
         {
-          sprintf(text, "%.15e", f);
+          sbs.precision(15);
         }
         else
         {
-          sprintf(text, "%.7e", f);
+          sbs.precision(7);
+        }
+      }
+
+      // write the value
+      sbs << f;
+      size_t l = sb.length();
+
+      if (l > 0)
+      {
+        // make sure there is a decimal point
+        size_t tk = (text[0] == '-' || text[0] == '+');
+        while (tk < l)
+        {
+          if (text[tk] < '0' || text[tk] > '9') { break; }
+          tk++;
+        }
+        if (tk == l)
+        {
+          text[l++] = '.';
+        }
+
+        // make sure there is a zero after the decimal point
+        if (text[l-1] == '.')
+        {
+          text[l++] = '0';
         }
       }
 
       // trim trailing zeros, except the one following decimal point
       size_t ti = 0;
-      while (text[ti] != '\0' && text[ti] != 'e') { ti++; }
+      while (ti < l && text[ti] != 'e') { ti++; }
       size_t tj = ti;
       while (tj > 1 && text[tj-1] == '0' && text[tj-2] != '.') { tj--; }
-      while (text[ti] != '\0') { text[tj++] = text[ti++]; }
+      // in scientific notation, remove decimal if followed by zero
+      if (ti < l && text[ti] == 'e')
+      {
+        if (tj > 2 && text[tj-1] == '0' && text[tj-2] == '.') { tj -= 2; }
+        else if (tj > 1 && text[tj-1] == '.') { tj -= 1; }
+      }
+      // this performs the actual removal
+      while (ti < l) { text[tj++] = text[ti++]; }
+      l = tj;
 
       // if exponent has three digits, clear the first if it is zero
-      if (tj >= 5 && text[tj-5] == 'e' && text[tj-3] == '0')
+      if (l >= 5 && text[l-5] == 'e' && text[l-3] == '0')
       {
-        text[tj-3] = text[tj-2];
-        text[tj-2] = text[tj-1];
-        tj--;
+        text[l-3] = text[l-2];
+        text[l-2] = text[l-1];
+        l--;
       }
 
-      text[tj] = '\0';
-      str.append(text);
+      str.append(text, l);
     }
   }
   else if (this->V->Type == VTK_UNSIGNED_CHAR ||
@@ -2527,7 +2865,7 @@ bool vtkDICOMValue::Matches(const vtkDICOMValue& value) const
         // point of comparison with the data set strings.
         if (tag != DC::SpecificCharacterSet)
         {
-          match = ip->GetAttributeValue(tag).Matches(iter->GetValue());
+          match = ip->Get(tag).Matches(iter->GetValue());
         }
         ++iter;
       }
@@ -2682,14 +3020,21 @@ ostream& operator<<(ostream& os, const vtkDICOMValue& v)
 {
   vtkDICOMVR vr = v.GetVR();
   const char *cp = v.GetCharData();
+  const vtkDICOMValue *vp = v.GetMultiplexData();
+  size_t m = v.GetNumberOfValues();
 
   if (!v.IsValid())
   {
     os << "empty[0]";
   }
+  else if (vp)
+  {
+    // value is a multiplex of per-instance values
+    os << "values[" << m << "]";
+  }
   else if (vr == vtkDICOMVR::UN)
   {
-    os << "unknown[" << v.GetNumberOfValues() << "]";
+    os << "unknown[" << m << "]";
   }
   else if (vr == vtkDICOMVR::ST ||
            vr == vtkDICOMVR::LT ||
@@ -2698,7 +3043,7 @@ ostream& operator<<(ostream& os, const vtkDICOMValue& v)
     // might have control characters, don't print it
     os << "text[" << v.GetVL() << "]";
   }
-  else if (cp)
+  else if (cp && !vr.HasSpecificCharacterSet())
   {
     const char *dp = cp + v.GetVL();
     while (cp != dp && *cp == ' ') { cp++; }
@@ -2719,7 +3064,6 @@ ostream& operator<<(ostream& os, const vtkDICOMValue& v)
   else if (vr == vtkDICOMVR::AT)
   {
     const vtkDICOMTag *tp = v.GetTagData();
-    size_t m = v.GetNumberOfValues();
     if (tp)
     {
       for (size_t j = 0; j < m; j++)
@@ -2735,52 +3079,42 @@ ostream& operator<<(ostream& os, const vtkDICOMValue& v)
   }
   else if (vr == vtkDICOMVR::SQ)
   {
-    os << "items[" << v.GetNumberOfValues() << "]";
+    os << "items[" << m << "]";
   }
   else if (vr == vtkDICOMVR::OB)
   {
-    os << "bytes[" << v.GetNumberOfValues() << "]";
+    os << "bytes[" << m << "]";
   }
   else if (vr == vtkDICOMVR::OW)
   {
-    os << "words[" << v.GetNumberOfValues() << "]";
+    os << "words[" << m << "]";
   }
-  else if (vr == vtkDICOMVR::OW)
+  else if (vr == vtkDICOMVR::OL)
   {
-    os << "longwords[" << v.GetNumberOfValues() << "]";
+    os << "longwords[" << m << "]";
   }
   else if (vr == vtkDICOMVR::OF)
   {
-    os << "floats[" << v.GetNumberOfValues() << "]";
+    os << "floats[" << m << "]";
   }
   else if (vr == vtkDICOMVR::OD)
   {
-    os << "doubles[" << v.GetNumberOfValues() << "]";
+    os << "doubles[" << m << "]";
   }
   else
   {
-    const vtkDICOMValue *vp = v.GetMultiplexData();
-    if (vp)
+    std::string s;
+    size_t n = (m <= 16 ? m : 16);
+    for (size_t i = 0; i < n; i++)
     {
-      // value is a multiplex of per-instance values
-      os << "values[" << v.GetNumberOfValues() << "]";
+      s.append((i == 0 ? "" : ","));
+      v.AppendValueToSafeUTF8String(s, i);
     }
-    else
+    if (m > n)
     {
-      std::string s;
-      size_t m = v.GetNumberOfValues();
-      size_t n = (m <= 16 ? m : 16);
-      for (size_t i = 0; i < n; i++)
-      {
-        s.append((i == 0 ? "" : ","));
-        v.AppendValueToUTF8String(s, i);
-      }
-      if (m > n)
-      {
-        s.append(",...");
-      }
-      os << s.c_str();
+      s.append(",...");
     }
+    os << s.c_str();
   }
 
   return os;

@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2016 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -17,9 +17,9 @@
 #include "vtkNIFTIHeader.h"
 #include "vtkNIFTIPrivate.h"
 
-#include <vtkMatrix4x4.h>
-#include <vtkStringArray.h>
-#include <vtkSmartPointer.h>
+#include "vtkMatrix4x4.h"
+#include "vtkStringArray.h"
+#include "vtkSmartPointer.h"
 
 #include <stdio.h>
 #include <ctype.h>
@@ -35,7 +35,7 @@ void printVersion(FILE *file, const char *cp)
 {
   fprintf(file, "%s %s\n", cp, DICOM_VERSION);
   fprintf(file, "\n"
-    "Copyright (c) 2012-2016, David Gobbi.\n\n"
+    "Copyright (c) 2012-2019, David Gobbi.\n\n"
     "This software is distributed under an open-source license.  See the\n"
     "Copyright.txt file that comes with the vtk-dicom source distribution.\n");
 }
@@ -317,7 +317,7 @@ int MAINMACRO(int argc, char *argv[])
   }
   else
   {
-    printf(" (freq_dim=%d, phase_dim=%d, slice_dim=%d\n",
+    printf(" (freq_dim=%d, phase_dim=%d, slice_dim=%d)\n",
            (hdr.dim_info & 0x3),
            ((hdr.dim_info >> 2) & 0x3),
            ((hdr.dim_info >> 4) & 0x3));

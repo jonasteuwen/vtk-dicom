@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2015 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -20,13 +20,13 @@
 #include "vtkDICOMUtilities.h"
 #include "vtkDICOMCharacterSet.h"
 
-#include <vtkObjectFactory.h>
-#include <vtkSmartPointer.h>
-#include <vtkStringArray.h>
-#include <vtkIntArray.h>
-#include <vtkErrorCode.h>
-#include <vtkCommand.h>
-#include <vtkUnsignedShortArray.h>
+#include "vtkObjectFactory.h"
+#include "vtkSmartPointer.h"
+#include "vtkStringArray.h"
+#include "vtkIntArray.h"
+#include "vtkErrorCode.h"
+#include "vtkCommand.h"
+#include "vtkUnsignedShortArray.h"
 
 #include <string>
 #include <vector>
@@ -296,11 +296,10 @@ void vtkDICOMFileSorter::SortFiles(vtkStringArray *input)
     // Insert the file into the sorted list
     FileInfo fileInfo;
     fileInfo.FileName = fileName;
-    fileInfo.StudyUID = meta->GetAttributeValue(DC::StudyInstanceUID);
-    fileInfo.SeriesUID = meta->GetAttributeValue(DC::SeriesInstanceUID);
-    fileInfo.InstanceUID = meta->GetAttributeValue(DC::SOPInstanceUID);
-    fileInfo.InstanceNumber =
-      meta->GetAttributeValue(DC::InstanceNumber).AsUnsignedInt();
+    fileInfo.StudyUID = meta->Get(DC::StudyInstanceUID);
+    fileInfo.SeriesUID = meta->Get(DC::SeriesInstanceUID);
+    fileInfo.InstanceUID = meta->Get(DC::SOPInstanceUID);
+    fileInfo.InstanceNumber = meta->Get(DC::InstanceNumber).AsUnsignedInt();
 
     const char *studyUID = fileInfo.StudyUID.GetCharData();
     const char *seriesUID = fileInfo.SeriesUID.GetCharData();
@@ -490,10 +489,10 @@ void vtkDICOMFileSorter::Execute()
       vtkSmartPointer<vtkStringArray>::New();
     if (d.GetError() == 0)
     {
-      int n = d.GetNumberOfFiles();
+      int n = d.GetNumberOfEntries();
       for (int i = 0; i < n; i++)
       {
-        const char *filename = d.GetFile(i);
+        const char *filename = d.GetEntry(i);
         if (vtkDICOMUtilities::PatternMatches(pattern.c_str(), filename) &&
             !d.IsDirectory(i))
         {

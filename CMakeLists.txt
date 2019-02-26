@@ -4,11 +4,6 @@ project(DICOM)
 # CMake version requirements
 cmake_minimum_required(VERSION 2.8.7)
 
-# When CMake 3.0.0 is required, remove this block (see CMP0042).
-if(NOT DEFINED CMAKE_MACOSX_RPATH)
-  set(CMAKE_MACOSX_RPATH 0)
-endif()
-
 # Allow custom cmake overrides
 set(DICOM_CMAKE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/CMake)
 set(CMAKE_MODULE_PATH ${DICOM_CMAKE_DIR} ${CMAKE_MODULE_PATH})
@@ -18,8 +13,8 @@ include(CTest)
 
 # Project version
 set(DICOM_MAJOR_VERSION 0)
-set(DICOM_MINOR_VERSION 7)
-set(DICOM_PATCH_VERSION 10)
+set(DICOM_MINOR_VERSION 8)
+set(DICOM_PATCH_VERSION 9)
 set(DICOM_SHORT_VERSION "${DICOM_MAJOR_VERSION}.${DICOM_MINOR_VERSION}")
 set(DICOM_VERSION "${DICOM_SHORT_VERSION}.${DICOM_PATCH_VERSION}")
 
@@ -34,8 +29,24 @@ set(DICOM_INCLUDE_DIRS
   "${DICOM_SOURCE_DIR}/Source"
   "${DICOM_BINARY_DIR}/Source")
 
-if(Module_vtkDICOM) # We are being built as a VTK remote module
+if(DEFINED VTK_MODULE_ENABLE_VTK_DICOM)
+  # When building as a remote module for VTK 9 (or VTK 8.90+)
+  message(STATUS "vtkDICOM: Building vtkDICOM as a Remote VTK Module")
 
+  # Clear VTK_LIBS, linking will be handled by modular build
+  set(VTK_LIBS)
+  set(VTK_DICOM_LINK_TARGET VTK::DICOM)
+
+  # To set DICOM_USE_VTKZLIB in vtkDICOMConfig.h
+  set(DICOM_USE_VTKZLIB ON)
+
+  option(BUILD_DICOM_PROGRAMS "Build the vtkDICOM tools" OFF)
+  option(BUILD_DICOM_EXAMPLES "Build the vtkDICOM examples" OFF)
+  set(BUILD_PROGRAMS ${BUILD_DICOM_PROGRAMS})
+  set(BUILD_EXAMPLES ${BUILD_DICOM_EXAMPLES})
+
+elseif(Module_vtkDICOM)
+  # When building as a remote module for older versions of VTK
   message(STATUS "vtkDICOM: Building vtkDICOM as a Remote VTK Module")
   set(vtkDICOM_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Source)
   set(vtkDICOM_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/Source)
@@ -43,14 +54,24 @@ if(Module_vtkDICOM) # We are being built as a VTK remote module
 
   # Clear VTK_LIBS, linking will be handled by modular build
   set(VTK_LIBS)
+  set(VTK_DICOM_LINK_TARGET vtkDICOM)
 
   # To set DICOM_USE_VTKZLIB in vtkDICOMConfig.h
   set(DICOM_USE_VTKZLIB ON)
 
   option(BUILD_DICOM_PROGRAMS "Build the vtkDICOM tools" ON)
+  option(BUILD_DICOM_EXAMPLES "Build the vtkDICOM examples" OFF)
   set(BUILD_PROGRAMS ${BUILD_DICOM_PROGRAMS})
+  set(BUILD_EXAMPLES ${BUILD_DICOM_EXAMPLES})
 
-else() # We are being built as a stand-alone package
+else()
+  # We are being built as a stand-alone package
+  set(VTK_DICOM_LINK_TARGET vtkDICOM)
+
+  # When CMake 3.0.0 is required, remove this block (see CMP0042).
+  if(NOT DEFINED CMAKE_MACOSX_RPATH)
+    set(CMAKE_MACOSX_RPATH 0)
+  endif()
 
   option(BUILD_SHARED_LIBS "Build shared libraries." OFF)
 
@@ -61,14 +82,28 @@ else() # We are being built as a stand-alone package
 
   find_package(VTK REQUIRED)
   message(STATUS "vtkDICOM: Building vtkDICOM stand-alone")
-  include(${VTK_USE_FILE})
-  if("${VTK_MAJOR_VERSION}.${VTK_MINOR_VERSION}" VERSION_LESS 5.8)
+  if(NOT DEFINED VTK_VERSION)
+    # backwards compatibility pre VTK 9.x
+    set(VTK_VERSION ${VTK_MAJOR_VERSION}.${VTK_MINOR_VERSION})
+  endif()
+  if(${VTK_VERSION} VERSION_LESS 8.90)
+    include(${VTK_USE_FILE})
+  endif()
+  if(${VTK_VERSION} VERSION_LESS 5.8)
     message(FATAL_ERROR "VTK 5.8 or later is required.")
   endif()
 
   # Wrap Python option
   if(VTK_WRAP_PYTHON)
-    option(BUILD_PYTHON_WRAPPERS "Build python wrappers" ON)
+    if(VTK_VERSION VERSION_LESS 8.90)
+      option(BUILD_PYTHON_WRAPPERS "Build python wrappers" ON)
+    else()
+      message(WARNING
+              "Stand-alone vtkDICOMPython not yet supported for "
+              "VTK ${VTK_VERSION}, try building vtk-dicom as a remote "
+              "module instead.")
+      unset(BUILD_PYTHON_WRAPPERS CACHE)
+    endif()
   else()
     unset(BUILD_PYTHON_WRAPPERS CACHE)
   endif()
@@ -82,7 +117,15 @@ else() # We are being built as a stand-alone package
 
   # Wrap Java option
   if(VTK_WRAP_JAVA)
-    option(BUILD_JAVA_WRAPPERS "Build java wrappers" OFF)
+    if(VTK_VERSION VERSION_LESS 8.90)
+      option(BUILD_PYTHON_WRAPPERS "Build python wrappers" ON)
+    else()
+      message(WARNING
+              "Stand-alone vtkDICOMJava not yet supported for "
+              "VTK ${VTK_VERSION}, try building vtk-dicom as a remote "
+              "module instead.")
+      unset(BUILD_JAVA_WRAPPERS CACHE)
+    endif()
   else()
     unset(BUILD_JAVA_WRAPPERS CACHE)
   endif()
@@ -157,11 +200,26 @@ if(USE_DCMTK)
   if(NOT DCMTK_FOUND)
     message(FATAL_ERROR "DCMTK not found or incomplete.")
   endif()
-  set(DCMTK_LIBS ${DCMTK_LIBRARIES} ${DCMTK_charls_LIBRARY})
+  if(${DCMTK_charls_LIBRARY})
+    set(DCMTK_LIBS ${DCMTK_LIBRARIES} ${DCMTK_charls_LIBRARY})
+  else()
+    set(DCMTK_LIBS ${DCMTK_LIBRARIES})
+  endif()
   if(APPLE)
     list(APPEND DCMTK_LIBS iconv)
   endif()
   include_directories(${DCMTK_INCLUDE_DIRS})
+endif()
+
+# Check for sqlite3 for reading OsiriX databases
+set(USE_SQLITE_DEFAULT OFF)
+set(SQLITE_LIBS)
+if(APPLE)
+  set(USE_SQLITE_DEFAULT ON)
+endif()
+option(USE_SQLITE "Use SQLite for OsiriX databases" ${USE_SQLITE_DEFAULT})
+if(USE_SQLITE)
+  set(SQLITE_LIBS sqlite3)
 endif()
 
 # Store the git hash of the current head
@@ -243,18 +301,23 @@ if(NOT Module_vtkDICOM)
   set(DICOM_LIBRARIES vtkDICOM)
 
   # The library dependencies
-  if("${VTK_MAJOR_VERSION}" GREATER 5)
-    set(VTK_LIBS vtkCommonCore vtkCommonDataModel vtkImagingCore vtkIOImage vtkIOSQL)
-    # If vtkIOMPIImage is present, it has factories for vtkIOImage
-    list(FIND VTK_LIBRARIES vtkIOMPIImage TMP_INDEX)
-    if(TMP_INDEX GREATER -1)
-      set(VTK_LIBS ${VTK_LIBS} vtkIOMPIImage)
+  if(NOT VTK_VERSION VERSION_LESS 6)
+    set(VTK_TARGET_PREFIX "VTK::")
+    if(VTK_VERSION VERSION_LESS 8.90)
+      set(VTK_TARGET_PREFIX "vtk")
     endif()
-    # If vtkIOMySQL is present, it has factories for vtkIOSQL
-    list(FIND VTK_LIBRARIES vtkIOMySQL TMP_INDEX)
-    if(TMP_INDEX GREATER -1)
-      set(VTK_LIBS ${VTK_LIBS} vtkIOMySQL)
-    endif()
+    set(VTK_LIBS)
+    # required libraries
+    foreach(_lib CommonCore CommonMisc CommonDataModel ImagingCore IOCore IOImage)
+      list(APPEND VTK_LIBS ${VTK_TARGET_PREFIX}${_lib})
+    endforeach()
+    # factory libraries (only needed if present)
+    foreach(_lib IOMPIImage)
+      list(FIND VTK_LIBRARIES ${VTK_TARGET_PREFIX}${_lib} _index)
+      if(_index GREATER -1)
+        list(APPEND VTK_LIBS ${VTK_TARGET_PREFIX}${_lib})
+      endif()
+    endforeach()
   else()
     set(VTK_LIBS vtkCommon vtkFiltering vtkImaging vtkIO vtkInfovis) # VTK 5.x
   endif()
@@ -264,7 +327,10 @@ if(NOT Module_vtkDICOM)
     ${VTK_WRAP_INCLUDE_DIRS})
 
   # For the python wrappers
-  if(BUILD_PYTHON_WRAPPERS)
+  if(BUILD_PYTHON_WRAPPERS AND
+     TARGET vtkCommonCorePythonD OR
+     TARGET vtkCommonKitPythonD OR
+     TARGET vtkCommonPythonD)
     set(DICOM_PYTHON_LIBRARIES vtkDICOMPythonD)
   endif()
 
@@ -279,10 +345,14 @@ if(NOT Module_vtkDICOM)
     find_package(Java REQUIRED)
     find_package(JNI REQUIRED)
 
-    set(VTK_JAVA_SOURCE_VERSION "1.5" CACHE STRING "javac source version")
-    set(VTK_JAVA_TARGET_VERSION "1.5" CACHE STRING "javac target version")
-    mark_as_advanced(VTK_JAVA_SOURCE_VERSION)
-    mark_as_advanced(VTK_JAVA_TARGET_VERSION)
+    if(NOT VTK_JAVA_SOURCE_VERSION)
+      set(VTK_JAVA_SOURCE_VERSION "1.6" CACHE STRING "javac source version")
+      mark_as_advanced(VTK_JAVA_SOURCE_VERSION)
+    endif()
+    if(NOT VTK_JAVA_TARGET_VERSION)
+      set(VTK_JAVA_TARGET_VERSION "1.6" CACHE STRING "javac target version")
+      mark_as_advanced(VTK_JAVA_TARGET_VERSION)
+    endif()
 
     if(APPLE)
       set(JAVAC_OPTIONS -J-Xmx512m)
@@ -308,9 +378,6 @@ if(MSVC_VERSION EQUAL 1400 OR MSVC_VERSION GREATER 1400 OR MSVC10)
   add_definitions(-D_SCL_SECURE_NO_DEPRECATE -D_SCL_SECURE_NO_WARNINGS)
 endif()
 
-# For use by subdirectories
-set(KWSYS_LIBS vtksys)
-
 # The main library
 add_subdirectory(Source)
 
@@ -320,20 +387,24 @@ if(BUILD_PROGRAMS)
   add_subdirectory(Programs)
 endif()
 
-if(BUILD_TESTING)
-  enable_testing()
-  add_subdirectory(Testing)
-endif()
-
 if(BUILD_EXAMPLES)
   add_subdirectory(Examples)
 endif()
 
-# Install files
-install(FILES Copyright.txt
-  DESTINATION ${DICOM_DATA_INSTALL_DEST})
+if(NOT DEFINED VTK_MODULE_ENABLE_VTK_DICOM)
 
-if(NOT Module_vtkDICOM)
+  if(BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(Testing)
+  endif()
+
+  # Install files
+  install(FILES Copyright.txt
+    DESTINATION ${DICOM_DATA_INSTALL_DEST})
+
+endif()
+
+if(NOT Module_vtkDICOM AND NOT DEFINED VTK_MODULE_ENABLE_VTK_DICOM)
   #---------------------------------------------------
   # Export information for other projects
 

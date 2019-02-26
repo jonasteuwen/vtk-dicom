@@ -2,7 +2,7 @@
 
   Program: DICOM for VTK
 
-  Copyright (c) 2012-2016 David Gobbi
+  Copyright (c) 2012-2019 David Gobbi
   All rights reserved.
   See Copyright.txt or http://dgobbi.github.io/bsd3.txt for details.
 
@@ -23,13 +23,13 @@
 #include "vtkDICOMFileDirectory.h"
 #include "vtkScancoCTReader.h"
 
-#include <vtkImageData.h>
-#include <vtkMatrix4x4.h>
-#include <vtkImageReslice.h>
-#include <vtkStringArray.h>
-#include <vtkIntArray.h>
-#include <vtkErrorCode.h>
-#include <vtkSmartPointer.h>
+#include "vtkImageData.h"
+#include "vtkMatrix4x4.h"
+#include "vtkImageReslice.h"
+#include "vtkStringArray.h"
+#include "vtkIntArray.h"
+#include "vtkErrorCode.h"
+#include "vtkSmartPointer.h"
 
 #include <string>
 #include <vector>
@@ -77,7 +77,7 @@ void scancotodicom_version(FILE *file, const char *command_name, bool verbose)
   {
     fprintf(file, "%s %s\n", cp, DICOM_VERSION);
     fprintf(file, "\n"
-      "Copyright (c) 2012-2016, David Gobbi.\n\n"
+      "Copyright (c) 2012-2019, David Gobbi.\n\n"
       "This software is distributed under an open-source license.  See the\n"
       "Copyright.txt file that comes with the vtk-dicom source distribution.\n");
   }
@@ -105,7 +105,7 @@ void scancotodicom_usage(FILE *file, const char *command_name)
     "  -s --silent             Do not print anything while executing.\n"
     "  -v --verbose            Verbose error reporting.\n"
     "  --series-description    Textual description of the series.\n"
-    "  --series-number         The series number ot use.\n"
+    "  --series-number         The series number to use.\n"
     "  --uid-prefix            A DICOM uid prefix (optional).\n"
     "  --version               Print the version and exit.\n"
     "  --build-version         Print source and build version.\n"
@@ -504,9 +504,9 @@ void scancotodicom_convert_one(
   }
 
   // set metadata from the file header
-  meta->SetAttributeValue(DC::Modality, modality);
-  // meta->SetAttributeValue(DC::Laterality, /* "L" or "R" */);
-  meta->SetAttributeValue(DC::ImageType, imageType);
+  meta->Set(DC::Modality, modality);
+  // meta->Set(DC::Laterality, /* "L" or "R" */);
+  meta->Set(DC::ImageType, imageType);
   // DC::Manufacturer Scanco
   // DC::ManufacturerModelName reader->GetScannerType()
   // DC::DeviceSerialNumber reader->GetScannerID()
@@ -517,55 +517,55 @@ void scancotodicom_convert_one(
     // conversion to Hounsfield units
     rescaleIntercept = -1000.0;
     rescaleSlope = 1000.0/(reader->GetMuScaling()*reader->GetMuWater());
-    meta->SetAttributeValue(DC::RescaleIntercept, rescaleIntercept);
-    meta->SetAttributeValue(DC::RescaleSlope, rescaleSlope);
-    meta->SetAttributeValue(DC::RescaleType, "HU");
+    meta->Set(DC::RescaleIntercept, rescaleIntercept);
+    meta->Set(DC::RescaleSlope, rescaleSlope);
+    meta->Set(DC::RescaleType, "HU");
   }
-  meta->SetAttributeValue(DC::KVP, reader->GetEnergy());
-  meta->SetAttributeValue(DC::AcquisitionNumber, reader->GetMeasurementIndex());
-  meta->SetAttributeValue(DC::ExposureTime, reader->GetSampleTime());
-  meta->SetAttributeValue(DC::XRayTubeCurrentInuA, 1000*reader->GetIntensity());
+  meta->Set(DC::KVP, reader->GetEnergy());
+  meta->Set(DC::AcquisitionNumber, reader->GetMeasurementIndex());
+  meta->Set(DC::ExposureTime, reader->GetSampleTime());
+  meta->Set(DC::XRayTubeCurrentInuA, 1000*reader->GetIntensity());
   if (fileType != SCANCO_RAD)
   {
-    meta->SetAttributeValue(DC::SliceThickness, reader->GetSliceThickness());
-    meta->SetAttributeValue(DC::DataCollectionDiameter, physdim[0]);
-    meta->SetAttributeValue(DC::ReconstructionDiameter, physdim[0]);
+    meta->Set(DC::SliceThickness, reader->GetSliceThickness());
+    meta->Set(DC::DataCollectionDiameter, physdim[0]);
+    meta->Set(DC::ReconstructionDiameter, physdim[0]);
   }
 
   // date
   char date[32];
-  if (!meta->HasAttribute(DC::StudyDate))
+  if (!meta->Has(DC::StudyDate))
   {
     strncpy(date, reader->GetCreationDate(), 32);
     scancotodicom_convert_date(date);
-    meta->SetAttributeValue(DC::StudyTime, &date[8]);
-    meta->SetAttributeValue(DC::SeriesTime, &date[8]);
+    meta->Set(DC::StudyTime, &date[8]);
+    meta->Set(DC::SeriesTime, &date[8]);
     date[8] = '\0';
-    meta->SetAttributeValue(DC::StudyDate, date);
-    meta->SetAttributeValue(DC::SeriesDate, date);
+    meta->Set(DC::StudyDate, date);
+    meta->Set(DC::SeriesDate, date);
   }
 
   if (fileType == SCANCO_AIM_SEG)
   {
     strncpy(date, reader->GetModificationDate(), 32);
     scancotodicom_convert_date(date);
-    meta->SetAttributeValue(DC::CreationTime, &date[8]);
+    meta->Set(DC::CreationTime, &date[8]);
     date[8] = '\0';
-    meta->SetAttributeValue(DC::CreationDate, date);
+    meta->Set(DC::CreationDate, date);
   }
 
   // patient
   const char *patient = reader->GetPatientName();
-  meta->SetAttributeValue(DC::PatientName, patient);
+  meta->Set(DC::PatientName, patient);
 
   // set the metadata supplied on the command line
   if (options->series_description)
   {
-    meta->SetAttributeValue(DC::SeriesDescription, options->series_description);
+    meta->Set(DC::SeriesDescription, options->series_description);
   }
   if (options->series_number)
   {
-    meta->SetAttributeValue(DC::SeriesNumber, options->series_number);
+    meta->Set(DC::SeriesNumber, options->series_number);
   }
 
   // The DICOM orientation matrix
